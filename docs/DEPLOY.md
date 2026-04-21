@@ -26,7 +26,7 @@ Only two things need a human in the loop. Everything else is `make`.
 ### 1. Wrangler login (once per workstation)
 
 ```bash
-cd unyt-watchtower
+cd watchtower
 nix develop           # optional but recommended
 pnpm wrangler login   # opens your browser; follow the OAuth flow
 ```
@@ -65,7 +65,7 @@ either a one-click in the dashboard or an API call. Pick one:
 
 ## One-time bring-up
 
-From `unyt-watchtower/` (ideally inside `nix develop`):
+From `watchtower/` (ideally inside `nix develop`):
 
 ```bash
 make install      # pnpm install in worker/ + dashboard/
@@ -81,7 +81,7 @@ want to push an update.
 ### Sanity check
 
 ```bash
-curl https://watchtower.unyt.dev/healthz
+curl https://watchtower.unyt. dev/healthz
 # -> ok
 
 curl https://watchtower.unyt.dev/api/observers
@@ -94,7 +94,7 @@ open https://watchtower.unyt.dev/
 ## Redeploy (everyday flow)
 
 ```bash
-cd unyt-watchtower
+cd watchtower
 make deploy                # worker + dashboard
 # or individually:
 make deploy-worker
@@ -117,7 +117,7 @@ make heart-always-online-2-watchtower   # or any other <server>-watchtower targe
 This runs `automation/scripts/setup-watchtower-observer.sh`, which:
 
 1. Builds `hc-watchtower-observer` and `hc-watchtower` on your workstation
-   (inside `nix develop` if `unyt-watchtower/flake.nix` is present).
+   (inside `nix develop` if `watchtower/flake.nix` is present).
 2. Copies both binaries to the server.
 3. Writes `/etc/hc-watchtower/observer.toml`, `/etc/hc-watchtower/ingest.secret`
    (0600), and the systemd unit.
