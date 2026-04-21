@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/chain_doc",
+    "crates/hc_store",
+    "crates/collector",
+    "crates/observer",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/unytco/unyt-watchtower"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.5", features = ["derive"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
+toml = "0.8"
+tabled = "0.20"
+humantime = "2"
+rmpv = "1"
+
+# Holochain deps (bumped together when holochain releases)
+holochain_client = { version = "0.8.1-rc.2", default-features = false }
+holochain_conductor_api = "0.6.1-rc.2"
+holochain_types = "0.6.1-rc.2"
+holochain_zome_types = "0.6.1-rc.0"
+holochain_sqlite = "0.6.1-rc.1"
+holochain_serialized_bytes = "=0.0.56"
+holo_hash = { version = "0.6.1-rc.0", features = ["kitsune2"] }
+kitsune2_api = "0.4.0-dev.2"
+kitsune2_core = "0.4.0-dev.2"
+kitsune2_dht = "0.4.0-dev.2"
+
+diesel = { version = "2.2", features = ["sqlite"] }
+libsqlite3-sys = { version = "0.35.0", features = [
+    "bundled-sqlcipher-vendored-openssl",
+] }
+sodoken = "0.1.0"
+
+# Internal crates
+unyt_watchtower_core = { path = "crates/core" }
+unyt_watchtower_chain_doc = { path = "crates/chain_doc" }
+unyt_watchtower_hc_store = { path = "crates/hc_store" }
+unyt_watchtower_collector = { path = "crates/collector" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

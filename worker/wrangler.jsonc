@@ -1,0 +1,34 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unyt-watchtower",
+  "account_id": "42bb42af90168b2108ab750004e4a0dd",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    { "pattern": "watchtower.unyt.dev/ingest",  "zone_name": "unyt.dev" },
+    { "pattern": "watchtower.unyt.dev/healthz", "zone_name": "unyt.dev" },
+    { "pattern": "watchtower.unyt.dev/api/*",   "zone_name": "unyt.dev" }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "watchtower",
+      "database_id": "5112868b-60db-4b58-b78b-32075fbfb879",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "vars": {
+    "SCHEMA_VERSION": "1",
+    "OBSERVER_TS_SKEW_SECS": "600",
+    "ALLOWED_ORIGINS": "https://watchtower.unyt.dev,http://localhost:5173"
+  },
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  }
+}

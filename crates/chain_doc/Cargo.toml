@@ -1,0 +1,15 @@
+[package]
+name = "unyt_watchtower_chain_doc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Inlined hc-chain-doc: simplify hc dump-state JSON into readable chain records"
+
+[dependencies]
+anyhow = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+rmpv = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

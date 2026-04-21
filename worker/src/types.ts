@@ -1,0 +1,140 @@
+export interface Env {
+  DB: D1Database;
+  SCHEMA_VERSION: string;
+  OBSERVER_TS_SKEW_SECS: string;
+  ALLOWED_ORIGINS: string;
+  RESEND_API_KEY?: string;
+  ALERT_FROM_ADDRESS?: string;
+}
+
+export interface SelfHealth {
+  uptime_s: number;
+  last_collection_ms: number;
+  n_errors_this_cycle: number;
+  binary_version: string;
+}
+
+export interface IngestPayload {
+  schema_version: number;
+  observer_id: string;
+  collected_at: string;
+  self_health: SelfHealth;
+  node: NodeSnapshot;
+}
+
+export interface NodeSnapshot {
+  conductor: ConductorSnapshot;
+  dnas: DnaSnapshot[];
+  apps: AppSummary[];
+  blocks: BlockSummary[];
+}
+
+export interface ConductorSnapshot {
+  holochain_version?: string | null;
+  admin_port?: number | null;
+  running_apps: number;
+  paused_apps: number;
+  disabled_apps: number;
+  nonce_count: number;
+  nonce_duplicate_count: number;
+}
+
+export interface DnaSnapshot {
+  dna_b64: string;
+  dna_tag?: string | null;
+  dna_definition?: {
+    zomes: string[];
+    properties_summary_json: string;
+    network_seed?: string | null;
+  } | null;
+  agents: AgentSummary[];
+  warrants: WarrantSummary[];
+  chain_summaries: ChainSummary[];
+  slice_hashes: SliceHashRow[];
+  chain_locks: ChainLockRow[];
+  scheduled_functions: ScheduledFunctionRow[];
+  validation_coverage: ValidationCoverageRow[];
+  cap_grants: CapGrantSummary[];
+  derived_metrics: DerivedMetrics;
+  pending_ops_count: number;
+  integrated_ops_count: number;
+}
+
+export interface AgentSummary {
+  agent_b64: string;
+  agent_tag?: string | null;
+  first_seen_iso: string;
+  last_seen_iso: string;
+  action_count: number;
+  warrants_issued: number;
+  warrants_against: number;
+}
+
+export interface WarrantSummary {
+  op_hash_b64: string;
+  warrant_type: string;
+  author_b64: string;
+  target_b64: string;
+  ts_iso: string;
+}
+
+export interface ChainSummary {
+  agent_b64: string;
+  action_count: number;
+  first_ts_iso: string;
+  last_ts_iso: string;
+}
+
+export interface SliceHashRow {
+  arc_start: number;
+  arc_end: number;
+  slice_index: number;
+  hash_b64: string;
+}
+
+export interface ChainLockRow {
+  author_b64: string;
+  subject_b64: string;
+  expires_at_iso: string;
+}
+
+export interface ScheduledFunctionRow {
+  author_b64: string;
+  zome: string;
+  fn_name: string;
+  scheduled_at_iso: string;
+}
+
+export interface ValidationCoverageRow {
+  op_hash_b64: string;
+  receipt_count: number;
+}
+
+export interface CapGrantSummary {
+  app_id: string;
+  cell_b64: string;
+  tag?: string | null;
+  function_count: number;
+  access_type: string;
+}
+
+export interface DerivedMetrics {
+  integration_rate: number;
+  lag_p50_ms: number;
+  lag_p99_ms: number;
+  pending_backlog: number;
+}
+
+export interface AppSummary {
+  app_id: string;
+  happ_name: string;
+  role_name: string;
+  clone_of_app_id?: string | null;
+}
+
+export interface BlockSummary {
+  target_id: string;
+  reason: string;
+  start_iso: string;
+  end_iso: string;
+}

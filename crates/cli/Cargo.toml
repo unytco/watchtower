@@ -1,0 +1,30 @@
+[package]
+name = "unyt_watchtower_cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "hc-watchtower operator CLI — quick views + Tier-2 exports"
+
+[[bin]]
+name = "hc-watchtower"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+tabled = { workspace = true }
+base64 = { workspace = true }
+
+unyt_watchtower_core = { workspace = true }
+unyt_watchtower_collector = { workspace = true }
+unyt_watchtower_chain_doc = { workspace = true }
+
+holo_hash = { workspace = true }
+holochain_client = { workspace = true }

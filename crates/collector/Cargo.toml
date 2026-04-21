@@ -1,0 +1,31 @@
+[package]
+name = "unyt_watchtower_collector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Collects Tier-1 summaries and writes Tier-2 exports for unyt-watchtower"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+base64 = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+
+unyt_watchtower_core = { workspace = true }
+unyt_watchtower_hc_store = { workspace = true }
+unyt_watchtower_chain_doc = { workspace = true }
+
+holochain_client = { workspace = true }
+holochain_conductor_api = { workspace = true }
+holochain_types = { workspace = true }
+holochain_zome_types = { workspace = true }
+holo_hash = { workspace = true }
+sodoken = { workspace = true }
+diesel = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

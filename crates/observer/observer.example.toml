@@ -1,0 +1,27 @@
+observer_id = "heart-always-online-1"
+
+[ingest]
+url = "https://watchtower.unyt.dev/ingest"
+secret_file = "/var/lib/hc-watchtower/ingest-secret"
+
+[holochain]
+admin_port = 8800
+data_root = "/var/lib/holochain/data"
+lair_passphrase_file = "/var/lib/holochain/lair-passphrase"
+
+[collection]
+interval_s = 3600
+lag_window_s = 3600
+validation_coverage_bottom_n = 50
+
+[exports]
+dir = "/var/lib/hc-watchtower/exports"
+max_age_days = 7
+max_total_mb = 5000
+
+# Optional: map hashes to short readable names.
+# [agent_tags]
+# "uhCAkT4uWvoJqj-wSCG09Eskw8715J2sF38Zn0_F_kUNzGlg2XAin" = "progenitor"
+#
+# [dna_tags]
+# "uhC0k..." = "unyt-ledger"

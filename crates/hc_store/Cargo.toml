@@ -1,0 +1,32 @@
+[package]
+name = "unyt_watchtower_hc_store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vendored hc-ops data layer (SQLite + admin-websocket) for unyt-watchtower"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+futures = "0.3"
+
+diesel = { workspace = true }
+libsqlite3-sys = { workspace = true }
+sodoken = { workspace = true }
+
+holochain_client = { workspace = true }
+holochain_conductor_api = { workspace = true }
+holochain_types = { workspace = true }
+holochain_zome_types = { workspace = true }
+holochain_sqlite = { workspace = true }
+holochain_serialized_bytes = { workspace = true }
+holo_hash = { workspace = true }
+kitsune2_api = { workspace = true }
+kitsune2_core = { workspace = true }
+kitsune2_dht = { workspace = true }

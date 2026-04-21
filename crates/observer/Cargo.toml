@@ -1,0 +1,30 @@
+[package]
+name = "unyt_watchtower_observer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Watchtower observer daemon: collect, sign, and POST Tier-1 snapshots"
+
+[[bin]]
+name = "hc-watchtower-observer"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+uuid = { workspace = true }
+humantime = { workspace = true }
+
+unyt_watchtower_core = { workspace = true }
+unyt_watchtower_collector = { workspace = true }
+
+holochain_client = { workspace = true }
