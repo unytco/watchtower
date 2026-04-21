@@ -11,12 +11,18 @@ use unyt_watchtower_collector::{CollectorConfig, HolochainConfig as CollectorHol
 pub struct ObserverConfig {
     pub observer_id: String,
     pub holochain: Holochain,
+    #[serde(default)]
     pub collection: Collection,
     pub exports: Exports,
     #[serde(default)]
     pub agent_tags: HashMap<String, String>,
     #[serde(default)]
     pub dna_tags: HashMap<String, String>,
+    /// Catch-all for sections this CLI doesn't care about (e.g. `[ingest]`).
+    /// Preserving them means `tag set`/`tag remove` round-trips without
+    /// dropping the observer daemon's ingest configuration.
+    #[serde(flatten)]
+    pub extra: toml::value::Table,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +40,16 @@ pub struct Collection {
     pub lag_window_s: i64,
     #[serde(default = "default_validation_coverage_bottom_n")]
     pub validation_coverage_bottom_n: i64,
+}
+
+impl Default for Collection {
+    fn default() -> Self {
+        Self {
+            interval_s: default_interval_s(),
+            lag_window_s: default_lag_window_s(),
+            validation_coverage_bottom_n: default_validation_coverage_bottom_n(),
+        }
+    }
 }
 
 fn default_interval_s() -> u64 {

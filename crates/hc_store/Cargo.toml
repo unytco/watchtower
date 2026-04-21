@@ -15,6 +15,7 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 futures = "0.3"
+human_bytes = { version = "0.4", default-features = false }
 
 diesel = { workspace = true }
 libsqlite3-sys = { workspace = true }
@@ -30,3 +31,6 @@ holo_hash = { workspace = true }
 kitsune2_api = { workspace = true }
 kitsune2_core = { workspace = true }
 kitsune2_dht = { workspace = true }
+
+[dev-dependencies]
+rand = "0.9"

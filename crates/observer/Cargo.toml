@@ -23,6 +23,7 @@ tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 uuid = { workspace = true }
 humantime = { workspace = true }
+hex = { workspace = true }
 
 unyt_watchtower_core = { workspace = true }
 unyt_watchtower_collector = { workspace = true }

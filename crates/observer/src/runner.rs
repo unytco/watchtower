@@ -25,7 +25,7 @@ pub async fn run_loop(cfg: ObserverConfig) -> Result<()> {
             tracing::error!(error = %e, "collection cycle failed");
         }
         let elapsed = cycle_start.elapsed();
-        let sleep_for = interval.checked_sub(elapsed).unwrap_or(Duration::from_secs(5));
+        let sleep_for = interval.checked_sub(elapsed).unwrap_or(Duration::ZERO);
         tokio::time::sleep(sleep_for).await;
     }
 }
@@ -48,7 +48,10 @@ async fn run_cycle(cfg: &ObserverConfig, started_at: Instant) -> Result<()> {
         }
     })
     .await
-    .unwrap_or_else(|_| Ok(Default::default()))
+    .unwrap_or_else(|join_err| {
+        tracing::error!(error = %join_err, "janitor task panicked");
+        Ok(Default::default())
+    })
     {
         tracing::warn!(error = %e, "export dir janitor failed");
     }

@@ -1,15 +1,9 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { ObserverSwitcher } from "./ObserverSwitcher";
 import { SearchBar } from "./SearchBar";
 
-const tabs: Array<{ to: string; label: string }> = [
-  { to: "/", label: "Overview" },
-  { to: "/dnas", label: "DNAs" },
-  { to: "/agents", label: "Agents" },
-  { to: "/warrants", label: "Warrants" },
-  { to: "/metrics", label: "Metrics" },
+const tabs: Array<{ to: string; label: string; end?: boolean }> = [
+  { to: "/", label: "DNAs", end: true },
   { to: "/alerts", label: "Alerts" },
-  { to: "/diff", label: "Diff" },
 ];
 
 export function Layout() {
@@ -18,7 +12,7 @@ export function Layout() {
       <header className="border-b border-border bg-surface">
         <div className="max-w-[1280px] mx-auto flex items-center gap-6 px-6 py-3">
           <Link to="/" className="font-semibold tracking-tight">
-            unyt · watchtower
+            watchtower
           </Link>
           <nav className="flex items-center gap-4 text-sm">
             {tabs.map((t) => (
@@ -28,7 +22,7 @@ export function Layout() {
                 className={({ isActive }) =>
                   `px-2 py-1 rounded ${isActive ? "text-fg" : "text-muted hover:text-fg"}`
                 }
-                end={t.to === "/"}
+                end={t.end}
               >
                 {t.label}
               </NavLink>
@@ -36,7 +30,6 @@ export function Layout() {
           </nav>
           <div className="ml-auto flex items-center gap-3">
             <SearchBar />
-            <ObserverSwitcher />
           </div>
         </div>
       </header>

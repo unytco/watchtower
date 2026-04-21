@@ -6,7 +6,6 @@
 //! The functions here are intentionally narrow, each returns a Vec of the
 //! smallest useful row. The collector layer turns these into Tier-1 DTOs.
 
-use crate::retrieve::schema;
 use crate::{HcOpsError, HcOpsResult};
 use diesel::prelude::*;
 use diesel::sql_query;
@@ -252,24 +251,30 @@ pub struct CapGrantRow {
 }
 
 pub fn list_capability_grants(authored: &mut SqliteConnection) -> HcOpsResult<Vec<CapGrantRow>> {
-    use schema::Entry::dsl as entry_fields;
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = Nullable<diesel::sql_types::Text>)]
+        tag: Option<String>,
+        #[diesel(sql_type = Nullable<diesel::sql_types::Binary>)]
+        functions: Option<Vec<u8>>,
+        #[diesel(sql_type = Nullable<diesel::sql_types::Text>)]
+        access_type: Option<String>,
+    }
 
-    let rows = schema::Entry::table
-        .filter(entry_fields::access_type.is_not_null())
-        .select((
-            entry_fields::tag,
-            entry_fields::functions,
-            entry_fields::access_type,
-        ))
-        .load::<(Option<String>, Option<Vec<u8>>, Option<String>)>(authored)?;
+    let rows: Vec<Row> = sql_query(
+        r#"SELECT tag, functions, access_type
+           FROM Entry
+           WHERE access_type IS NOT NULL"#,
+    )
+    .get_results(authored)?;
 
     Ok(rows
         .into_iter()
-        .map(|(tag, functions_blob, access_type)| CapGrantRow {
+        .map(|r| CapGrantRow {
             cell_bytes: Vec::new(),
-            tag,
-            function_count: count_grant_functions(functions_blob.as_deref()),
-            access_type: access_type.unwrap_or_else(|| "Unknown".to_string()),
+            tag: r.tag,
+            function_count: count_grant_functions(r.functions.as_deref()),
+            access_type: r.access_type.unwrap_or_else(|| "Unknown".to_string()),
         })
         .collect())
 }

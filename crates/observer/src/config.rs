@@ -9,6 +9,7 @@ pub struct ObserverConfig {
     pub observer_id: String,
     pub ingest: IngestConfig,
     pub holochain: Holochain,
+    #[serde(default)]
     pub collection: Collection,
     pub exports: Exports,
     #[serde(default)]
@@ -38,6 +39,16 @@ pub struct Collection {
     pub lag_window_s: i64,
     #[serde(default = "default_validation_coverage_bottom_n")]
     pub validation_coverage_bottom_n: i64,
+}
+
+impl Default for Collection {
+    fn default() -> Self {
+        Self {
+            interval_s: default_interval_s(),
+            lag_window_s: default_lag_window_s(),
+            validation_coverage_bottom_n: default_validation_coverage_bottom_n(),
+        }
+    }
 }
 
 fn default_interval_s() -> u64 {
@@ -90,10 +101,9 @@ impl ObserverConfig {
     }
 
     pub fn read_secret(&self) -> Result<Vec<u8>> {
-        let mut s = std::fs::read_to_string(&self.ingest.secret_file)?;
-        while s.ends_with('\n') || s.ends_with('\r') {
-            s.pop();
-        }
-        Ok(s.into_bytes())
+        let raw = std::fs::read_to_string(&self.ingest.secret_file)?;
+        let trimmed = raw.trim();
+        hex::decode(trimmed)
+            .map_err(|e| anyhow::anyhow!("ingest secret is not valid hex: {e}"))
     }
 }

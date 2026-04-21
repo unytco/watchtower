@@ -13,7 +13,7 @@ ROOT_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 SCRIPTS  := $(ROOT_DIR)scripts
 
 .PHONY: help install bootstrap bootstrap-d1 bootstrap-pages \
-        deploy deploy-worker deploy-dashboard secrets \
+        deploy deploy-worker deploy-dashboard secrets seed-alerts \
         status login test typecheck
 
 help: ## Show this help
@@ -45,6 +45,9 @@ deploy: deploy-worker deploy-dashboard ## Deploy both Worker and dashboard
 
 secrets: ## Interactively set Worker secrets (RESEND_API_KEY, ALERT_FROM_ADDRESS)
 	bash $(SCRIPTS)/secrets.sh
+
+seed-alerts: ## Provision default alert rules (override with WORKER_URL / RECIPIENT env vars)
+	bash $(SCRIPTS)/seed-alert-rules.sh
 
 status: ## Show recent Worker + Pages deployments
 	@echo "── Worker deployments ──"

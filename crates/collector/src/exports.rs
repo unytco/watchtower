@@ -36,7 +36,7 @@ impl<'a> Exporter<'a> {
         dna: &holo_hash::DnaHash,
         agent: &holo_hash::AgentPubKey,
     ) -> Result<PathBuf> {
-        use unyt_watchtower_hc_store::readable::{HumanReadable, HumanReadableDisplay};
+        use unyt_watchtower_hc_store::readable::HumanReadableDisplay;
         use unyt_watchtower_hc_store::retrieve;
 
         let mut key = crate::tier1_key(self.cfg)?;

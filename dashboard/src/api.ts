@@ -1,5 +1,8 @@
 import useSWR from "swr";
 
+// Empty in prod (worker and dashboard share the same origin, watchtower.unyt.dev).
+// Set VITE_API_BASE for local dev when the worker is not reachable via the vite
+// dev-server proxy, e.g. pointing to http://127.0.0.1:8787.
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
 
 export const fetcher = async <T>(url: string): Promise<T> => {
@@ -19,16 +22,51 @@ export interface Observer {
   binary_version: string;
 }
 
-export interface Agent {
-  observer_id: string;
+export interface DnaListRow {
   dna_b64: string;
+  dna_tag: string | null;
+  observer_count: number;
+  agent_count: number;
+  total_actions: number;
+  warrant_count: number;
+  first_seen_iso: string | null;
+  last_activity_iso: string | null;
+}
+
+export interface DnaSummary {
+  dna_b64: string;
+  dna_tag: string | null;
+  agents: number;
+  total_actions: number;
+  warrants: number;
+  observers: number;
+  last_activity_iso: string | null;
+}
+
+export interface DnaAgent {
   agent_b64: string;
   agent_tag: string | null;
+  action_count: number;
+  observer_count: number;
   first_seen_iso: string;
   last_seen_iso: string;
-  action_count: number;
   warrants_issued: number;
   warrants_against: number;
+  // Populated only in per_observer mode.
+  observer_id?: string;
+  dna_b64?: string;
+}
+
+export interface DnaObserver {
+  observer_id: string;
+  is_healthy: number | null;
+  n_errors: number | null;
+  observer_last_seen: string | null;
+  binary_version: string | null;
+  dna_first_seen: string;
+  dna_last_seen: string;
+  agents_seen: number;
+  actions_reported: number;
 }
 
 export interface Warrant {
@@ -57,46 +95,81 @@ export function useObservers() {
   });
 }
 
-export function useSummary(observerId?: string) {
-  const q = observerId ? `?observer_id=${encodeURIComponent(observerId)}` : "";
-  return useSWR<{ agents: number; warrants: number; dnas: number }>(
-    `/api/summary${q}`,
+export function useDnaList() {
+  return useSWR<{ dnas: DnaListRow[] }>("/api/dnas", fetcher, {
+    refreshInterval: 30_000,
+  });
+}
+
+export function useDnaSummary(dna: string | undefined) {
+  return useSWR<DnaSummary>(
+    dna ? `/api/dnas/${encodeURIComponent(dna)}/summary` : null,
     fetcher,
     { refreshInterval: 30_000 },
   );
 }
 
-export function useAgents(observerId?: string, dna?: string) {
+export function useDnaAgents(
+  dna: string | undefined,
+  opts: { perObserver?: boolean; limit?: number } = {},
+) {
   const params = new URLSearchParams();
-  if (observerId) params.set("observer_id", observerId);
-  if (dna) params.set("dna", dna);
-  const q = params.toString() ? `?${params}` : "";
-  return useSWR<{ agents: Agent[] }>(`/api/agents${q}`, fetcher);
-}
-
-export function useWarrants(observerId?: string) {
-  const q = observerId ? `?observer_id=${encodeURIComponent(observerId)}` : "";
-  return useSWR<{ warrants: Warrant[] }>(`/api/warrants${q}`, fetcher);
-}
-
-export function useMetrics(observerId?: string, dna?: string, hours = 24) {
-  const params = new URLSearchParams({ hours: String(hours) });
-  if (observerId) params.set("observer_id", observerId);
-  if (dna) params.set("dna", dna);
-  return useSWR<{ metrics: MetricPoint[] }>(`/api/metrics?${params}`, fetcher);
-}
-
-export function useDiff(since: string, observerId?: string) {
-  const params = new URLSearchParams({ since });
-  if (observerId) params.set("observer_id", observerId);
-  return useSWR<{ since: string; observer_id?: string; changed: Record<string, number> }>(
-    `/api/diff?${params}`,
+  if (opts.perObserver) params.set("per_observer", "1");
+  if (opts.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString() ? `?${params}` : "";
+  return useSWR<{ agents: DnaAgent[]; per_observer: boolean }>(
+    dna ? `/api/dnas/${encodeURIComponent(dna)}/agents${qs}` : null,
     fetcher,
   );
 }
 
+export function useDnaObservers(dna: string | undefined) {
+  return useSWR<{ observers: DnaObserver[] }>(
+    dna ? `/api/dnas/${encodeURIComponent(dna)}/observers` : null,
+    fetcher,
+    { refreshInterval: 30_000 },
+  );
+}
+
+export function useWarrants(opts: { observerId?: string; dna?: string; limit?: number } = {}) {
+  const params = new URLSearchParams();
+  if (opts.observerId) params.set("observer_id", opts.observerId);
+  if (opts.dna) params.set("dna", opts.dna);
+  if (opts.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString() ? `?${params}` : "";
+  return useSWR<{ warrants: Warrant[] }>(`/api/warrants${qs}`, fetcher);
+}
+
+export function useMetrics(opts: { observerId?: string; dna?: string; hours?: number } = {}) {
+  const params = new URLSearchParams({ hours: String(opts.hours ?? 24) });
+  if (opts.observerId) params.set("observer_id", opts.observerId);
+  if (opts.dna) params.set("dna", opts.dna);
+  return useSWR<{ metrics: MetricPoint[] }>(`/api/metrics?${params}`, fetcher);
+}
+
+export function useDiff(
+  since: string,
+  opts: { observerId?: string; dna?: string } = {},
+) {
+  const params = new URLSearchParams({ since });
+  if (opts.observerId) params.set("observer_id", opts.observerId);
+  if (opts.dna) params.set("dna", opts.dna);
+  return useSWR<{
+    since: string;
+    observer_id?: string;
+    dna_b64?: string;
+    changed: Record<string, number>;
+  }>(`/api/diff?${params}`, fetcher);
+}
+
 export function useSearch(q: string) {
   return useSWR<{
-    results: Array<{ kind: string; hash: string; dna_b64: string; observer_id: string; tag: string | null }>;
+    results: Array<{
+      kind: string;
+      hash: string;
+      dna_b64: string;
+      observer_id: string;
+      tag: string | null;
+    }>;
   }>(q ? `/api/search?q=${encodeURIComponent(q)}` : null, fetcher);
 }

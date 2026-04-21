@@ -39,11 +39,20 @@
             pkg-config
             openssl
             llvmPackages_18.libunwind
+            pkgsCross.musl64.stdenv.cc
           ]);
 
           shellHook = ''
             export PS1='\[\033[1;35m\][watchtower:\w]\$\[\033[0m\] '
             export LIBCLANG_PATH="${pkgs.llvmPackages_18.libclang.lib}/lib"
+
+            # Cross-compile to x86_64-unknown-linux-musl so the observer + CLI
+            # produce a fully-static ELF that can be scp'd to non-Nix servers
+            # without an /nix/store dependency for the dynamic loader.
+            export CC_x86_64_unknown_linux_musl="${pkgs.pkgsCross.musl64.stdenv.cc}/bin/x86_64-unknown-linux-musl-cc"
+            export AR_x86_64_unknown_linux_musl="${pkgs.pkgsCross.musl64.stdenv.cc.bintools.bintools}/bin/x86_64-unknown-linux-musl-ar"
+            export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="$CC_x86_64_unknown_linux_musl"
+            export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes"
           '';
         };
       };

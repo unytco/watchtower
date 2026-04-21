@@ -575,6 +575,75 @@ pub fn count_actions_by_author(dht: &mut SqliteConnection) -> HcOpsResult<Vec<(A
     Ok(out)
 }
 
+/// Enumerate the `(dna, agent)` pairs that have an authored DB on this node.
+///
+/// Scans `{data_root}/databases/authored/` for files named `{dna}-{agent}`
+/// where both halves are the `Display` form of a Holochain hash
+/// (`u` + base64url-no-pad of the 39 raw bytes). Filenames that do not
+/// match the expected shape are skipped with a warning log.
+pub fn list_authored_identities<P: AsRef<Path>>(
+    data_root_path: P,
+) -> HcOpsResult<Vec<(DnaHash, AgentPubKey)>> {
+    let dir = data_root_path.as_ref().join("databases").join("authored");
+    let mut out = Vec::new();
+    if !dir.exists() {
+        return Ok(out);
+    }
+
+    let read_dir = std::fs::read_dir(&dir).map_err(HcOpsError::from)?;
+    for entry in read_dir {
+        let entry = entry.map_err(HcOpsError::from)?;
+        let path = entry.path();
+        // SQLite side-files (-wal, -shm) share the base name; only inspect
+        // the primary file to avoid duplicate parsing attempts.
+        if path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.ends_with("-wal") || name.ends_with("-shm") {
+            continue;
+        }
+        match parse_authored_db_name(name) {
+            Ok(Some(pair)) => out.push(pair),
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(file = %name, error = %e, "skipping unparseable authored db name");
+            }
+        }
+    }
+
+    out.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    out.dedup();
+    Ok(out)
+}
+
+fn parse_authored_db_name(name: &str) -> HcOpsResult<Option<(DnaHash, AgentPubKey)>> {
+    let Some((dna_str, agent_str)) = name.split_once('-') else {
+        return Ok(None);
+    };
+    let dna_bytes = decode_display_hash_bytes(dna_str)?;
+    let agent_bytes = decode_display_hash_bytes(agent_str)?;
+    Ok(Some((
+        DnaHash::try_from_raw_39(dna_bytes)?,
+        AgentPubKey::try_from_raw_39(agent_bytes)?,
+    )))
+}
+
+fn decode_display_hash_bytes(display: &str) -> HcOpsResult<Vec<u8>> {
+    use base64::Engine;
+
+    let body = display.strip_prefix('u').ok_or_else(|| {
+        HcOpsError::Other(
+            format!("hash string {display:?} missing 'u' prefix").into(),
+        )
+    })?;
+    base64::prelude::BASE64_URL_SAFE_NO_PAD
+        .decode(body)
+        .map_err(|e| HcOpsError::Other(format!("base64 decode failed: {e}").into()))
+}
+
 pub fn get_slice_hashes(authored: &mut SqliteConnection) -> HcOpsResult<Vec<SliceHash>> {
     use diesel::prelude::*;
 

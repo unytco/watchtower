@@ -1,22 +1,22 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
-import fs from "node:fs";
-import path from "node:path";
+import schemaSql from "../src/schema.sql?raw";
 
 const SECRET_HEX = "a".repeat(64);
 const OBSERVER_ID = "test-observer";
 
 async function applySchema() {
-  const sql = fs.readFileSync(path.resolve(__dirname, "../src/schema.sql"), "utf8");
-  const statements = sql
+  const stripped = schemaSql
+    .split("\n")
+    .filter((line: string) => !line.trim().startsWith("--"))
+    .join("\n");
+  const singleLine = stripped
     .split(/;\s*\n/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  for (const s of statements) {
-    // @ts-expect-error test binding
-    await env.DB.exec(s);
-  }
-  // @ts-expect-error test binding
+    .map((s: string) => s.replace(/\s+/g, " ").trim())
+    .filter((s: string) => s.length > 0)
+    .map((s: string) => `${s};`)
+    .join("\n");
+  await env.DB.exec(singleLine);
   await env.DB.prepare(
     "INSERT OR REPLACE INTO observer_secrets (observer_id, secret_hex, created_at) VALUES (?, ?, ?)",
   )
@@ -84,7 +84,7 @@ async function signedRequest(bodyObj: unknown, overrides: Record<string, string>
   const body = new TextEncoder().encode(JSON.stringify(bodyObj));
   const ts = overrides.ts ?? new Date().toISOString();
   const nonce = overrides.nonce ?? crypto.randomUUID();
-  const digest = await sha256Hex(body.buffer);
+  const digest = await sha256Hex(body.buffer as ArrayBuffer);
   const sig = await hmacHex(SECRET_HEX, [OBSERVER_ID, ts, nonce, digest].join("\n"));
   return new Request("http://test/ingest", {
     method: "POST",

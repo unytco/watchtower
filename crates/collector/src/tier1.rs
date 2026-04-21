@@ -35,20 +35,15 @@ pub async fn collect_node_snapshot(
     let mut conductor_snap = conductor_snapshot(cfg, admin).await?;
     conductor_snap.running_apps = apps
         .iter()
-        .filter(|a| matches!(a.status, holochain_conductor_api::AppInfoStatus::Running))
+        .filter(|a| matches!(a.status, holochain_types::app::AppStatus::Enabled))
         .count() as u32;
     conductor_snap.paused_apps = apps
         .iter()
-        .filter(|a| matches!(a.status, holochain_conductor_api::AppInfoStatus::Paused { .. }))
+        .filter(|a| matches!(a.status, holochain_types::app::AppStatus::AwaitingMemproofs))
         .count() as u32;
     conductor_snap.disabled_apps = apps
         .iter()
-        .filter(|a| {
-            matches!(
-                a.status,
-                holochain_conductor_api::AppInfoStatus::Disabled { .. }
-            )
-        })
+        .filter(|a| matches!(a.status, holochain_types::app::AppStatus::Disabled(_)))
         .count() as u32;
 
     let dna_hashes = admin
@@ -167,16 +162,17 @@ fn collect_dna_snapshot(cfg: &CollectorConfig, dna_hash: &DnaHash) -> Result<Dna
     let warrants: Vec<WarrantSummary> = warrant_records
         .iter()
         .map(|w| {
-            let author_b64 = format!("{:?}", w.warrant.action().author);
-            let target_b64 = format!("{:?}", w.warrant.action().warrantee);
+            let warrant = w.warrant.data();
+            let author_b64 = tag::b64url(&warrant.author.get_raw_39());
+            let target_b64 = tag::b64url(&warrant.warrantee.get_raw_39());
             *issued.entry(author_b64.clone()).or_default() += 1;
             *against.entry(target_b64.clone()).or_default() += 1;
             WarrantSummary {
                 op_hash_b64: tag::b64url(&w.dht_op.hash.get_raw_39()),
-                warrant_type: format!("{:?}", w.warrant.action().proof),
+                warrant_type: format!("{:?}", warrant.proof),
                 author_b64,
                 target_b64,
-                ts_iso: ts_to_iso(w.warrant.action().timestamp.0),
+                ts_iso: ts_to_iso(warrant.timestamp.0),
             }
         })
         .collect();
@@ -213,14 +209,68 @@ fn collect_dna_snapshot(cfg: &CollectorConfig, dna_hash: &DnaHash) -> Result<Dna
         })
         .collect();
 
-    // Slice hashes — from the authored DB if the first agent is one of ours,
-    // otherwise skip. Slice hashes are useful for network-wide comparison.
-    let slice_hashes: Vec<SliceHashRow> = Vec::new();
+    // Slice hashes, chain locks, and scheduled functions live in the
+    // per-(dna, agent) authored DB. Enumerate every authored identity this
+    // node owns for this DNA, open each DB, and union the rows. A single
+    // unreadable authored DB (e.g. wrong key, missing file) should not
+    // abort the whole DNA snapshot.
+    let mut slice_hashes: Vec<SliceHashRow> = Vec::new();
+    let mut chain_locks: Vec<ChainLockRow> = Vec::new();
+    let mut scheduled_functions: Vec<ScheduledFunctionRow> = Vec::new();
 
-    // Chain locks + scheduled functions live in authored DBs; we only read
-    // them for our known agents if available.
-    let chain_locks: Vec<ChainLockRow> = Vec::new();
-    let scheduled_functions: Vec<ScheduledFunctionRow> = Vec::new();
+    let authored_pairs = retrieve::list_authored_identities(&cfg.holochain.data_root)
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "list_authored_identities failed");
+            Vec::new()
+        });
+
+    for (authored_dna, authored_agent) in authored_pairs
+        .iter()
+        .filter(|(d, _)| d == dna_hash)
+    {
+        let Ok(mut authored) = retrieve::open_holochain_database(
+            &cfg.holochain.data_root,
+            &retrieve::DbKind::Authored(authored_agent.clone()),
+            authored_dna,
+            load_key(cfg)?.as_mut(),
+        ) else {
+            tracing::warn!(
+                dna = %authored_dna,
+                agent = %authored_agent,
+                "failed to open authored db; skipping"
+            );
+            continue;
+        };
+
+        match retrieve::get_slice_hashes(&mut authored) {
+            Ok(rows) => slice_hashes.extend(rows.into_iter().map(|r| SliceHashRow {
+                arc_start: r.arc_start as u32,
+                arc_end: r.arc_end as u32,
+                slice_index: r.slice_index as u64,
+                hash_b64: tag::b64url(&r.hash),
+            })),
+            Err(e) => tracing::warn!(error = %e, "get_slice_hashes failed"),
+        }
+
+        match extensions::list_chain_locks(&mut authored) {
+            Ok(rows) => chain_locks.extend(rows.into_iter().map(|r| ChainLockRow {
+                author_b64: tag::b64url(&r.author.get_raw_39()),
+                subject_b64: tag::b64url(&r.subject),
+                expires_at_iso: ts_to_iso(r.expires_at_us),
+            })),
+            Err(e) => tracing::warn!(error = %e, "list_chain_locks failed"),
+        }
+
+        match extensions::list_scheduled_functions(&mut authored) {
+            Ok(rows) => scheduled_functions.extend(rows.into_iter().map(|r| ScheduledFunctionRow {
+                author_b64: tag::b64url(&r.author.get_raw_39()),
+                zome: r.zome,
+                fn_name: r.fn_name,
+                scheduled_at_iso: ts_to_iso(r.scheduled_at_us),
+            })),
+            Err(e) => tracing::warn!(error = %e, "list_scheduled_functions failed"),
+        }
+    }
 
     // Validation coverage bottom-N.
     let coverage_rows =

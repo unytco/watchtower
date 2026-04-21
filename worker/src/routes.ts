@@ -12,41 +12,156 @@ routes.get("/observers", async (c) => {
   return c.json({ observers: results });
 });
 
-routes.get("/summary", async (c) => {
-  const observerId = c.req.query("observer_id");
-  const rows = await c.env.DB.batch([
-    bindOptional(
-      c.env.DB.prepare(
-        `SELECT COUNT(*) AS c FROM agents_discovered ${observerId ? "WHERE observer_id = ?" : ""}`,
-      ),
-      observerId,
-    ),
-    bindOptional(
-      c.env.DB.prepare(
-        `SELECT COUNT(*) AS c FROM warrants ${observerId ? "WHERE observer_id = ?" : ""}`,
-      ),
-      observerId,
-    ),
-    bindOptional(
-      c.env.DB.prepare(
-        `SELECT COUNT(*) AS c FROM dnas_seen ${observerId ? "WHERE observer_id = ?" : ""}`,
-      ),
-      observerId,
-    ),
-  ]);
-  return c.json({
-    observer_id: observerId,
-    agents: rowCount(rows[0]),
-    warrants: rowCount(rows[1]),
-    dnas: rowCount(rows[2]),
-  });
+// Per-DNA list for the home page. One row per dna_b64, with aggregates across
+// every observer that has ever reported that DNA. `total_actions` is the sum
+// of each agent's MAX(action_count) so observers that disagree on a single
+// agent's count only contribute once.
+routes.get("/dnas", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT d.dna_b64,
+            MAX(COALESCE(dt.name, d.dna_tag))                       AS dna_tag,
+            COUNT(DISTINCT d.observer_id)                           AS observer_count,
+            (SELECT COUNT(DISTINCT agent_b64)
+               FROM agents_discovered a
+              WHERE a.dna_b64 = d.dna_b64)                          AS agent_count,
+            (SELECT COALESCE(SUM(ac), 0) FROM (
+                SELECT MAX(action_count) AS ac
+                  FROM agents_discovered a
+                 WHERE a.dna_b64 = d.dna_b64
+                 GROUP BY agent_b64
+             ))                                                     AS total_actions,
+            (SELECT COUNT(DISTINCT op_hash_b64)
+               FROM warrants w
+              WHERE w.dna_b64 = d.dna_b64)                          AS warrant_count,
+            MAX(d.last_seen_iso)                                    AS last_activity_iso,
+            MIN(d.first_seen_iso)                                   AS first_seen_iso
+       FROM dnas_seen d
+  LEFT JOIN dna_tags dt ON dt.dna_b64 = d.dna_b64
+      GROUP BY d.dna_b64
+      ORDER BY last_activity_iso DESC
+      LIMIT 500`,
+  ).all();
+  return c.json({ dnas: results });
 });
 
-routes.get("/agents", async (c) => {
+// Per-DNA tile numbers.
+routes.get("/dnas/:dna/summary", async (c) => {
+  const dna = c.req.param("dna");
+  const row = await c.env.DB.prepare(
+    `SELECT
+       (SELECT COUNT(DISTINCT agent_b64) FROM agents_discovered WHERE dna_b64 = ?1)             AS agents,
+       (SELECT COALESCE(SUM(ac), 0) FROM (
+            SELECT MAX(action_count) AS ac
+              FROM agents_discovered
+             WHERE dna_b64 = ?1
+             GROUP BY agent_b64))                                                               AS total_actions,
+       (SELECT COUNT(DISTINCT op_hash_b64) FROM warrants WHERE dna_b64 = ?1)                    AS warrants,
+       (SELECT COUNT(DISTINCT observer_id) FROM dnas_seen WHERE dna_b64 = ?1)                   AS observers,
+       (SELECT MAX(last_seen_iso) FROM dnas_seen WHERE dna_b64 = ?1)                            AS last_activity_iso,
+       (SELECT MAX(COALESCE(dt.name, ds.dna_tag))
+          FROM dnas_seen ds
+     LEFT JOIN dna_tags dt ON dt.dna_b64 = ds.dna_b64
+         WHERE ds.dna_b64 = ?1)                                                                 AS dna_tag`,
+  )
+    .bind(dna)
+    .first<{
+      agents: number;
+      total_actions: number;
+      warrants: number;
+      observers: number;
+      last_activity_iso: string | null;
+      dna_tag: string | null;
+    }>();
+  return c.json({ dna_b64: dna, ...(row ?? {}) });
+});
+
+// Per-DNA agents. Two shapes:
+// - default (canonical): one row per agent_b64. action_count = MAX across
+//   observers so two observers reporting the same agent don't double-count.
+//   warrants_issued / warrants_against come from DISTINCT op_hash_b64 in the
+//   warrants table to avoid double-counting across observers.
+// - ?per_observer=1: one row per (observer_id, agent_b64). Useful for
+//   spotting disagreements between observers.
+routes.get("/dnas/:dna/agents", async (c) => {
+  const dna = c.req.param("dna");
+  const perObserver = c.req.query("per_observer") === "1";
+  const limit = Number(c.req.query("limit") ?? 500);
+
+  if (perObserver) {
+    const { results } = await c.env.DB.prepare(
+      `SELECT a.observer_id,
+              a.dna_b64,
+              a.agent_b64,
+              a.agent_tag,
+              a.first_seen_iso,
+              a.last_seen_iso,
+              a.action_count,
+              a.warrants_issued,
+              a.warrants_against
+         FROM agents_discovered a
+        WHERE a.dna_b64 = ?1
+        ORDER BY a.action_count DESC
+        LIMIT ?2`,
+    )
+      .bind(dna, limit)
+      .all();
+    return c.json({ agents: results, per_observer: true });
+  }
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT a.agent_b64,
+            MAX(COALESCE(at.name, a.agent_tag))                          AS agent_tag,
+            MAX(a.action_count)                                          AS action_count,
+            COUNT(DISTINCT a.observer_id)                                AS observer_count,
+            MIN(a.first_seen_iso)                                        AS first_seen_iso,
+            MAX(a.last_seen_iso)                                         AS last_seen_iso,
+            (SELECT COUNT(DISTINCT op_hash_b64) FROM warrants w
+               WHERE w.dna_b64 = a.dna_b64 AND w.author_b64 = a.agent_b64) AS warrants_issued,
+            (SELECT COUNT(DISTINCT op_hash_b64) FROM warrants w
+               WHERE w.dna_b64 = a.dna_b64 AND w.target_b64 = a.agent_b64) AS warrants_against
+       FROM agents_discovered a
+  LEFT JOIN agent_tags at ON at.observer_id = a.observer_id AND at.pubkey_b64 = a.agent_b64
+      WHERE a.dna_b64 = ?1
+      GROUP BY a.agent_b64
+      ORDER BY action_count DESC
+      LIMIT ?2`,
+  )
+    .bind(dna, limit)
+    .all();
+  return c.json({ agents: results, per_observer: false });
+});
+
+// Per-DNA observer list with DNA-scoped coverage plus each observer's global
+// health snapshot.
+routes.get("/dnas/:dna/observers", async (c) => {
+  const dna = c.req.param("dna");
+  const { results } = await c.env.DB.prepare(
+    `SELECT d.observer_id,
+            o.is_healthy,
+            o.n_errors,
+            o.last_seen_iso                                               AS observer_last_seen,
+            o.binary_version,
+            d.first_seen_iso                                              AS dna_first_seen,
+            d.last_seen_iso                                               AS dna_last_seen,
+            (SELECT COUNT(DISTINCT agent_b64) FROM agents_discovered a
+               WHERE a.dna_b64 = d.dna_b64 AND a.observer_id = d.observer_id) AS agents_seen,
+            (SELECT COALESCE(SUM(action_count), 0) FROM agents_discovered a
+               WHERE a.dna_b64 = d.dna_b64 AND a.observer_id = d.observer_id) AS actions_reported
+       FROM dnas_seen d
+  LEFT JOIN observers o ON o.observer_id = d.observer_id
+      WHERE d.dna_b64 = ?
+      ORDER BY d.last_seen_iso DESC`,
+  )
+    .bind(dna)
+    .all();
+  return c.json({ observers: results });
+});
+
+routes.get("/warrants", async (c) => {
   const observerId = c.req.query("observer_id");
   const dna = c.req.query("dna");
   const limit = Number(c.req.query("limit") ?? 200);
-  let sql = `SELECT * FROM agents_discovered WHERE 1=1`;
+  let sql = `SELECT * FROM warrants WHERE 1=1`;
   const binds: unknown[] = [];
   if (observerId) {
     sql += ` AND observer_id = ?`;
@@ -55,34 +170,6 @@ routes.get("/agents", async (c) => {
   if (dna) {
     sql += ` AND dna_b64 = ?`;
     binds.push(dna);
-  }
-  sql += ` ORDER BY action_count DESC LIMIT ?`;
-  binds.push(limit);
-  const { results } = await c.env.DB.prepare(sql).bind(...binds).all();
-  return c.json({ agents: results });
-});
-
-routes.get("/dnas", async (c) => {
-  const observerId = c.req.query("observer_id");
-  let sql = `SELECT observer_id, dna_b64, dna_tag, first_seen_iso, last_seen_iso FROM dnas_seen`;
-  const binds: unknown[] = [];
-  if (observerId) {
-    sql += ` WHERE observer_id = ?`;
-    binds.push(observerId);
-  }
-  sql += ` ORDER BY last_seen_iso DESC LIMIT 500`;
-  const { results } = await c.env.DB.prepare(sql).bind(...binds).all();
-  return c.json({ dnas: results });
-});
-
-routes.get("/warrants", async (c) => {
-  const observerId = c.req.query("observer_id");
-  const limit = Number(c.req.query("limit") ?? 200);
-  let sql = `SELECT * FROM warrants`;
-  const binds: unknown[] = [];
-  if (observerId) {
-    sql += ` WHERE observer_id = ?`;
-    binds.push(observerId);
   }
   sql += ` ORDER BY ts_iso DESC LIMIT ?`;
   binds.push(limit);
@@ -114,11 +201,12 @@ routes.get("/metrics", async (c) => {
 routes.get("/diff", async (c) => {
   const since = c.req.query("since");
   const observerId = c.req.query("observer_id");
+  const dna = c.req.query("dna");
   if (!since) return c.text("missing ?since=ISO", 400);
 
   const table = c.req.query("table");
   if (table) {
-    return diffOne(c, table, since, observerId);
+    return diffOne(c, table, since, observerId, dna);
   }
   const tables = [
     "agents_discovered",
@@ -132,10 +220,9 @@ routes.get("/diff", async (c) => {
   ];
   const out: Record<string, number> = {};
   for (const t of tables) {
-    const r = await countSince(c.env, t, since, observerId);
-    out[t] = r;
+    out[t] = await countSince(c.env, t, since, observerId, dna);
   }
-  return c.json({ since, observer_id: observerId, changed: out });
+  return c.json({ since, observer_id: observerId, dna_b64: dna, changed: out });
 });
 
 routes.get("/search", async (c) => {
@@ -207,31 +294,15 @@ routes.post("/alerts/incidents/:id/resolve", async (c) => {
   return c.json({ ok: true });
 });
 
-routes.get("/analysis", async (c) => {
-  const { results } = await c.env.DB.prepare(
-    `SELECT id, kind, computed_at, result_json FROM analysis_runs
-     ORDER BY computed_at DESC LIMIT 50`,
-  ).all();
-  return c.json({ analysis: results });
-});
-
-function bindOptional(stmt: D1PreparedStatement, val?: string): D1PreparedStatement {
-  return val ? stmt.bind(val) : stmt;
-}
-
-function rowCount(r: D1Result): number {
-  const first = (r.results?.[0] ?? {}) as { c?: number };
-  return first.c ?? 0;
-}
-
 async function diffOne(
   c: { env: Env; json: (value: unknown) => Response },
   table: string,
   since: string,
   observerId?: string,
+  dna?: string,
 ): Promise<Response> {
-  const count = await countSince(c.env, table, since, observerId);
-  return c.json({ table, since, observer_id: observerId, changed: count });
+  const count = await countSince(c.env, table, since, observerId, dna);
+  return c.json({ table, since, observer_id: observerId, dna_b64: dna, changed: count });
 }
 
 async function countSince(
@@ -239,6 +310,7 @@ async function countSince(
   table: string,
   since: string,
   observerId?: string,
+  dna?: string,
 ): Promise<number> {
   const allowed = new Set([
     "agents_discovered",
@@ -259,6 +331,13 @@ async function countSince(
   if (observerId) {
     sql += ` AND observer_id = ?`;
     binds.push(observerId);
+  }
+  // Some tables (cap_grants, blocks, apps) have no dna_b64 column, so we only
+  // apply the DNA filter when the table actually carries one.
+  const tablesWithoutDna = new Set(["cap_grants", "blocks", "apps"]);
+  if (dna && !tablesWithoutDna.has(table)) {
+    sql += ` AND dna_b64 = ?`;
+    binds.push(dna);
   }
   const row = await env.DB.prepare(sql)
     .bind(...binds)
