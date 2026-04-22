@@ -1,40 +1,112 @@
 use crate::config::ObserverConfig;
 use anyhow::{Context, Result};
 use chrono::Utc;
+use ham::{compute_delay_ms, install_shutdown_handler, is_connection_error, BackoffConfig};
+use holochain_client::{AdminWebsocket, WebsocketConfig};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::select;
 use unyt_watchtower_collector::{collect_node_snapshot, Exporter};
 use unyt_watchtower_core::{
-    canonical_string, body_digest_hex, headers, sign, IngestPayload, SelfHealth, SCHEMA_VERSION,
+    body_digest_hex, canonical_string, headers, sign, IngestPayload, SelfHealth, SCHEMA_VERSION,
 };
 
 const BINARY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// How many times to retry admin-WS connect inside a single collection cycle
+/// before giving up and letting the outer loop schedule the next tick.
+const MAX_CONNECT_ATTEMPTS_PER_CYCLE: u32 = 3;
+
 pub async fn run_loop(cfg: ObserverConfig) -> Result<()> {
     let started_at = Instant::now();
     let interval = Duration::from_secs(cfg.collection.interval_s);
+    let mut shutdown = install_shutdown_handler();
+    let ws_cfg = build_ws_config(&cfg);
+
     tracing::info!(
         observer_id = %cfg.observer_id,
         interval_s = cfg.collection.interval_s,
+        ws_request_timeout_s = cfg.holochain.ws_request_timeout_s,
         "starting observer loop"
     );
 
     loop {
         let cycle_start = Instant::now();
-        if let Err(e) = run_cycle(&cfg, started_at).await {
-            tracing::error!(error = %e, "collection cycle failed");
+
+        select! {
+            res = run_cycle(&cfg, started_at, ws_cfg.clone()) => {
+                if let Err(e) = res {
+                    tracing::error!(error = %e, "collection cycle failed");
+                }
+            }
+            _ = shutdown.changed() => {
+                tracing::info!("shutdown signal received, exiting observer loop");
+                return Ok(());
+            }
         }
+
         let elapsed = cycle_start.elapsed();
         let sleep_for = interval.checked_sub(elapsed).unwrap_or(Duration::ZERO);
-        tokio::time::sleep(sleep_for).await;
+        select! {
+            _ = tokio::time::sleep(sleep_for) => {}
+            _ = shutdown.changed() => {
+                tracing::info!("shutdown signal received during idle, exiting observer loop");
+                return Ok(());
+            }
+        }
     }
 }
 
 pub async fn run_once(cfg: &ObserverConfig) -> Result<()> {
-    run_cycle(cfg, Instant::now()).await
+    let ws_cfg = build_ws_config(cfg);
+    run_cycle(cfg, Instant::now(), ws_cfg).await
 }
 
-async fn run_cycle(cfg: &ObserverConfig, started_at: Instant) -> Result<()> {
+fn build_ws_config(cfg: &ObserverConfig) -> Arc<WebsocketConfig> {
+    let mut c = WebsocketConfig::CLIENT_DEFAULT;
+    c.default_request_timeout = Duration::from_secs(cfg.holochain.ws_request_timeout_s);
+    Arc::new(c)
+}
+
+async fn connect_admin_with_retry(
+    admin_port: u16,
+    ws_cfg: Arc<WebsocketConfig>,
+) -> Result<AdminWebsocket> {
+    let backoff = BackoffConfig::default();
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), admin_port);
+    let mut attempt: u32 = 0;
+
+    loop {
+        match AdminWebsocket::connect_with_config(addr, ws_cfg.clone(), None).await {
+            Ok(ws) => return Ok(ws),
+            Err(e) => {
+                let err = anyhow::anyhow!("admin websocket connect: {e:?}");
+                let transient = is_connection_error(&err);
+                attempt += 1;
+                if attempt >= MAX_CONNECT_ATTEMPTS_PER_CYCLE || !transient {
+                    return Err(err.context(format!(
+                        "giving up after {attempt} attempt(s)"
+                    )));
+                }
+                let delay_ms = compute_delay_ms(attempt, &backoff);
+                tracing::warn!(
+                    error = %err,
+                    attempt,
+                    delay_ms,
+                    "admin websocket connect failed, retrying"
+                );
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            }
+        }
+    }
+}
+
+async fn run_cycle(
+    cfg: &ObserverConfig,
+    started_at: Instant,
+    ws_cfg: Arc<WebsocketConfig>,
+) -> Result<()> {
     let t0 = Instant::now();
     let collector_cfg = cfg.to_collector();
 
@@ -56,10 +128,7 @@ async fn run_cycle(cfg: &ObserverConfig, started_at: Instant) -> Result<()> {
         tracing::warn!(error = %e, "export dir janitor failed");
     }
 
-    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), cfg.holochain.admin_port);
-    let admin = holochain_client::AdminWebsocket::connect(addr, None)
-        .await
-        .map_err(|e| anyhow::anyhow!("admin websocket connect: {e:?}"))?;
+    let admin = connect_admin_with_retry(cfg.holochain.admin_port, ws_cfg).await?;
 
     let node = collect_node_snapshot(&collector_cfg, &admin)
         .await

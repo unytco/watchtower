@@ -29,3 +29,4 @@ unyt_watchtower_core = { workspace = true }
 unyt_watchtower_collector = { workspace = true }
 
 holochain_client = { workspace = true }
+ham = { workspace = true }

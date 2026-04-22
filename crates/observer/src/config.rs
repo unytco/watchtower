@@ -29,6 +29,14 @@ pub struct Holochain {
     pub admin_port: u16,
     pub data_root: PathBuf,
     pub lair_passphrase_file: PathBuf,
+    /// Per-request timeout (seconds) applied to every admin websocket call.
+    /// Prevents a hung conductor call from blocking the observer loop indefinitely.
+    #[serde(default = "default_ws_request_timeout_s")]
+    pub ws_request_timeout_s: u64,
+}
+
+fn default_ws_request_timeout_s() -> u64 {
+    60
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

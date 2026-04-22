@@ -2,10 +2,29 @@ use crate::config::{self, ObserverConfig};
 use crate::render;
 use crate::TagCommand;
 use anyhow::{anyhow, Context, Result};
+use ham::is_connection_error;
+use holochain_client::WebsocketConfig;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 use unyt_watchtower_collector::{collect_node_snapshot, Exporter};
 use unyt_watchtower_core::tag;
+
+/// Per-request timeout applied to every admin websocket call from the CLI.
+/// Can be overridden via the `HC_WATCHTOWER_WS_REQUEST_TIMEOUT_SECS` env var.
+/// Default: 30s — CLIs should fail fast rather than hang the operator shell.
+const DEFAULT_CLI_WS_REQUEST_TIMEOUT_SECS: u64 = 30;
+
+fn cli_ws_config() -> Arc<WebsocketConfig> {
+    let secs = std::env::var("HC_WATCHTOWER_WS_REQUEST_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_CLI_WS_REQUEST_TIMEOUT_SECS);
+    let mut c = WebsocketConfig::CLIENT_DEFAULT;
+    c.default_request_timeout = Duration::from_secs(secs);
+    Arc::new(c)
+}
 
 pub async fn status(cfg: &ObserverConfig) -> Result<()> {
     let snap = collect(cfg).await?;
@@ -133,9 +152,16 @@ async fn collect_with(
     c: &unyt_watchtower_collector::CollectorConfig,
 ) -> Result<unyt_watchtower_core::NodeSnapshot> {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), c.holochain.admin_port);
-    let admin = holochain_client::AdminWebsocket::connect(addr, None)
+    let admin = holochain_client::AdminWebsocket::connect_with_config(addr, cli_ws_config(), None)
         .await
-        .map_err(|e| anyhow!("admin websocket: {e:?}"))?;
+        .map_err(|e| {
+            let err = anyhow!("admin websocket: {e:?}");
+            if is_connection_error(&err) {
+                err.context("conductor may be down or restarting")
+            } else {
+                err
+            }
+        })?;
     collect_node_snapshot(c, &admin)
         .await
         .map_err(|e| anyhow!("collect: {e}"))

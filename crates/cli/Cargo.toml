@@ -28,3 +28,4 @@ unyt_watchtower_chain_doc = { workspace = true }
 
 holo_hash = { workspace = true }
 holochain_client = { workspace = true }
+ham = { workspace = true }

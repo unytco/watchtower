@@ -37,16 +37,16 @@ humantime = "2"
 rmpv = "1"
 
 # Holochain deps (bumped together when holochain releases)
-holochain_client = { version = "0.8.1-rc.2", default-features = false }
-holochain_conductor_api = "0.6.1-rc.2"
-holochain_types = "0.6.1-rc.2"
-holochain_zome_types = "0.6.1-rc.0"
-holochain_sqlite = "0.6.1-rc.1"
-holochain_serialized_bytes = "=0.0.56"
-holo_hash = { version = "0.6.1-rc.0", features = ["kitsune2"] }
-kitsune2_api = "0.4.0-dev.2"
-kitsune2_core = "0.4.0-dev.2"
-kitsune2_dht = "0.4.0-dev.2"
+holochain_client = { version = "0.8.1-rc.7", default-features = false }
+holochain_conductor_api = "0.6.1-rc.7"
+holochain_types = "0.6.1-rc.7"
+holochain_zome_types = "0.6.1-rc.5"
+holochain_sqlite = "0.6.1-rc.5"
+holochain_serialized_bytes = "0.0.57"
+holo_hash = { version = "0.6.1-rc.5", features = ["kitsune2"] }
+kitsune2_api = "0.4.0-dev.10"
+kitsune2_core = "0.4.0-dev.10"
+kitsune2_dht = "0.4.0-dev.10"
 
 diesel = { version = "2.2", features = ["sqlite"] }
 libsqlite3-sys = { version = "0.35.0", features = [
@@ -59,6 +59,10 @@ unyt_watchtower_core = { path = "crates/core" }
 unyt_watchtower_chain_doc = { path = "crates/chain_doc" }
 unyt_watchtower_hc_store = { path = "crates/hc_store" }
 unyt_watchtower_collector = { path = "crates/collector" }
+
+# Shared Holochain client helpers (ham = Holochain AppWebsocket/Admin helpers).
+# TODO(ham-migration): switch to `ham = { git = "https://github.com/unytco/ham.git", rev = "<sha>" }` once the ham repo is pushed to GitHub.
+ham = { path = "../ham" }
 
 [profile.release]
 lto = "thin"
