@@ -61,8 +61,7 @@ unyt_watchtower_hc_store = { path = "crates/hc_store" }
 unyt_watchtower_collector = { path = "crates/collector" }
 
 # Shared Holochain client helpers (ham = Holochain AppWebsocket/Admin helpers).
-# TODO(ham-migration): switch to `ham = { git = "https://github.com/unytco/ham.git", rev = "<sha>" }` once the ham repo is pushed to GitHub.
-ham = { path = "../ham" }
+ham = { git = "https://github.com/unytco/ham.git", branch = "main" }
 
 [profile.release]
 lto = "thin"
