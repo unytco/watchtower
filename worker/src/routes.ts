@@ -209,12 +209,17 @@ routes.get("/diff", async (c) => {
     return diffOne(c, table, since, observerId, dna);
   }
   const tables = [
+    // DNA-scoped (filtered by ?dna= when provided)
+    "dnas_seen",
     "agents_discovered",
     "warrants",
     "chain_locks",
     "validation_coverage",
-    "cap_grants",
     "scheduled_functions",
+    "slice_hashes",
+    "chain_summaries",
+    // Node-scoped (no dna_b64 column; count is for the whole observer)
+    "cap_grants",
     "blocks",
     "apps",
   ];

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useDnaList, useObservers } from "../api";
-import { labelForDna, relTime, truncHash } from "../lib/format";
+import { labelForDna, relTime } from "../lib/format";
+import { CopyableHash } from "../components/CopyableHash";
 
 export function DnaList() {
   const { data: dnaData, error: dnaError, isLoading } = useDnaList();
@@ -46,8 +47,8 @@ export function DnaList() {
                   </div>
                 </div>
                 {d.dna_tag && (
-                  <div className="text-xs text-muted mono mt-0.5">
-                    {truncHash(d.dna_b64, 10, 6)}
+                  <div className="text-xs text-muted mt-0.5">
+                    <CopyableHash value={d.dna_b64} head={10} tail={6} />
                   </div>
                 )}
                 <div className="grid grid-cols-4 gap-3 mt-4">

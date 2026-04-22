@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useDnaAgents } from "../../api";
-import { labelForAgent, relTime, truncHash } from "../../lib/format";
+import { labelForAgent, relTime } from "../../lib/format";
+import { CopyableHash } from "../../components/CopyableHash";
 
 type Ctx = { dna: string };
 
@@ -49,16 +50,21 @@ export function DnaAgents() {
                 : r.agent_b64;
               return (
                 <tr key={key} className="border-t border-border">
-                  <td className="px-3 py-2 mono">
-                    {labelForAgent(r.agent_tag, r.agent_b64)}
+                  <td className="px-3 py-2">
+                    <CopyableHash
+                      value={r.agent_b64}
+                      label={labelForAgent(r.agent_tag, r.agent_b64)}
+                    />
                     {r.agent_tag && (
-                      <span className="text-muted ml-2 text-xs">
-                        {truncHash(r.agent_b64)}
+                      <span className="ml-2 text-xs text-muted">
+                        <CopyableHash value={r.agent_b64} />
                       </span>
                     )}
                   </td>
                   {perObserver && (
-                    <td className="px-3 py-2 mono text-xs">{r.observer_id}</td>
+                    <td className="px-3 py-2 text-xs">
+                      <CopyableHash value={r.observer_id ?? ""} />
+                    </td>
                   )}
                   <td className="px-3 py-2 text-right mono">
                     {r.action_count.toLocaleString()}

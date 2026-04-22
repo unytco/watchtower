@@ -2,10 +2,17 @@ import { useMemo } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useMetrics, type MetricPoint } from "../../api";
 import { Sparkline } from "../../components/Sparkline";
+import { CopyableHash } from "../../components/CopyableHash";
+import { HelpTip } from "../../components/HelpTip";
+import { formatBucketLocal } from "../../lib/format";
+import {
+  formatMetric,
+  metricHelp,
+  metricLabels,
+  type MetricField,
+} from "../../lib/metricHelp";
 
 type Ctx = { dna: string };
-
-type MetricField = "integration_rate" | "lag_p50_ms" | "lag_p99_ms" | "pending_backlog";
 
 export function DnaMetrics() {
   const { dna } = useOutletContext<Ctx>();
@@ -31,16 +38,25 @@ export function DnaMetrics() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {keys.map((observer) => {
           const rows = byObserver[observer];
+          const lastBucket = rows
+            .map((r) => r.bucket_hour_iso)
+            .sort()
+            .pop();
           return (
             <div
               key={observer}
               className="bg-surface border border-border rounded p-4"
             >
-              <div className="text-xs text-muted mono mb-3">{observer}</div>
-              <MetricRow label="Integration rate" rows={rows} field="integration_rate" />
-              <MetricRow label="Lag p50 (ms)" rows={rows} field="lag_p50_ms" />
-              <MetricRow label="Lag p99 (ms)" rows={rows} field="lag_p99_ms" />
-              <MetricRow label="Pending backlog" rows={rows} field="pending_backlog" />
+              <div className="flex items-baseline justify-between mb-3 text-xs">
+                <CopyableHash value={observer} />
+                {lastBucket && (
+                  <span className="text-muted">{formatBucketLocal(lastBucket)}</span>
+                )}
+              </div>
+              <MetricRow rows={rows} field="integration_rate" />
+              <MetricRow rows={rows} field="lag_p50_ms" />
+              <MetricRow rows={rows} field="lag_p99_ms" />
+              <MetricRow rows={rows} field="pending_backlog" />
             </div>
           );
         })}
@@ -50,11 +66,9 @@ export function DnaMetrics() {
 }
 
 function MetricRow({
-  label,
   rows,
   field,
 }: {
-  label: string;
   rows: MetricPoint[];
   field: MetricField;
 }) {
@@ -67,12 +81,17 @@ function MetricRow({
   const last = data[data.length - 1]?.value ?? 0;
   return (
     <div className="flex items-center gap-3 mb-2">
-      <div className="w-36 text-xs text-muted">{label}</div>
-      <div className="flex-1 min-w-0">
-        <Sparkline data={data} />
+      <div className="w-36 text-xs text-muted flex items-center gap-1.5">
+        <span>{metricLabels[field]}</span>
+        <HelpTip label={`What is ${metricLabels[field]}?`}>
+          {metricHelp[field]}
+        </HelpTip>
       </div>
-      <div className="w-16 text-right mono text-sm">
-        {Number(last).toFixed(2)}
+      <div className="flex-1 min-w-0">
+        <Sparkline data={data} field={field} />
+      </div>
+      <div className="w-24 text-right mono text-sm">
+        {formatMetric(field, last)}
       </div>
     </div>
   );

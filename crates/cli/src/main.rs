@@ -34,18 +34,21 @@ enum Command {
 
     /// List agents discovered in a DNA.
     ListAgents {
+        /// DNA hash. Accepts `uhC0k…` (Holochain canonical) or `hC0k…` (dashboard).
         #[arg(long)]
         dna: String,
     },
 
     /// List warrants in a DNA (or across all DNAs).
     ListWarrants {
+        /// DNA hash. Accepts `uhC0k…` (Holochain canonical) or `hC0k…` (dashboard).
         #[arg(long)]
         dna: Option<String>,
     },
 
     /// List validation coverage bottom-N for a DNA.
     Coverage {
+        /// DNA hash. Accepts `uhC0k…` (Holochain canonical) or `hC0k…` (dashboard).
         #[arg(long)]
         dna: String,
         #[arg(long, default_value_t = 20)]
@@ -54,14 +57,17 @@ enum Command {
 
     /// Export the full chain of one agent to a Tier-2 file.
     ExportChain {
+        /// DNA hash. Accepts `uhC0k…` (Holochain canonical) or `hC0k…` (dashboard).
         #[arg(long)]
         dna: String,
+        /// Agent pubkey. Accepts `uhCAk…` (Holochain canonical) or `hCAk…` (dashboard).
         #[arg(long)]
         agent: String,
     },
 
     /// Dump every pending op (with bodies) for a DNA.
     ExportPendingOps {
+        /// DNA hash. Accepts `uhC0k…` (Holochain canonical) or `hC0k…` (dashboard).
         #[arg(long)]
         dna: String,
     },

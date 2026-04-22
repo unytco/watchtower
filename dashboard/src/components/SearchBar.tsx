@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSearch } from "../api";
-import { truncHash } from "../lib/format";
+import { formatHash } from "../lib/format";
 
 export function SearchBar() {
   const [q, setQ] = useState("");
@@ -27,9 +27,9 @@ export function SearchBar() {
               </div>
               <div className="mono">
                 {r.tag ? `${r.tag} · ` : ""}
-                {truncHash(r.hash, 10, 6)}
+                {formatHash(r.hash, 10, 6)}
               </div>
-              <div className="mono text-muted">{truncHash(r.dna_b64, 10, 6)}</div>
+              <div className="mono text-muted">{formatHash(r.dna_b64, 10, 6)}</div>
             </div>
           ))}
         </div>

@@ -189,5 +189,10 @@ describe("DNA-scoped routes", () => {
     const body = await resp.json<{ changed: Record<string, number> }>();
     expect(body.changed.agents_discovered).toBe(3);
     expect(body.changed.warrants).toBe(2);
+    // Newly-exposed DNA-scoped tables must be present (even if zero) so the
+    // dashboard can group them consistently.
+    expect(body.changed.dnas_seen).toBeTypeOf("number");
+    expect(body.changed.slice_hashes).toBeTypeOf("number");
+    expect(body.changed.chain_summaries).toBeTypeOf("number");
   });
 });

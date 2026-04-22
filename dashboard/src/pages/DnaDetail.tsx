@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useParams, Link } from "react-router-dom";
 import { useDnaSummary } from "../api";
-import { labelForDna, relTime, truncHash } from "../lib/format";
+import { labelForDna, relTime } from "../lib/format";
+import { CopyableHash } from "../components/CopyableHash";
 
 const subTabs: Array<{ to: string; label: string; end?: boolean }> = [
   { to: ".", label: "Overview", end: true },
@@ -8,7 +9,7 @@ const subTabs: Array<{ to: string; label: string; end?: boolean }> = [
   { to: "warrants", label: "Warrants" },
   { to: "observers", label: "Observers" },
   { to: "metrics", label: "Metrics" },
-  { to: "diff", label: "Diff" },
+  { to: "diff", label: "Activity" },
 ];
 
 export function DnaDetail() {
@@ -20,12 +21,12 @@ export function DnaDetail() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <div className="text-xs text-muted">
+        <div className="text-xs text-muted flex items-center gap-1">
           <Link to="/" className="hover:text-fg">
             DNAs
-          </Link>{" "}
-          ·{" "}
-          <span className="mono">{truncHash(dnaB64, 10, 6)}</span>
+          </Link>
+          <span aria-hidden>·</span>
+          <CopyableHash value={dnaB64} head={10} tail={6} />
         </div>
         <div className="flex items-baseline justify-between gap-3">
           <h1 className="text-xl font-semibold">{title}</h1>
@@ -36,7 +37,9 @@ export function DnaDetail() {
           )}
         </div>
         {summary?.dna_tag && (
-          <div className="text-xs text-muted mono">{dnaB64}</div>
+          <div className="text-xs text-muted">
+            <CopyableHash value={dnaB64} head={64} tail={0} />
+          </div>
         )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">

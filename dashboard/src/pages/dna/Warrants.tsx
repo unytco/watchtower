@@ -1,6 +1,7 @@
 import { useOutletContext } from "react-router-dom";
 import { useWarrants } from "../../api";
-import { relTime, truncHash } from "../../lib/format";
+import { relTime } from "../../lib/format";
+import { CopyableHash } from "../../components/CopyableHash";
 
 type Ctx = { dna: string };
 
@@ -34,16 +35,18 @@ export function DnaWarrants() {
                 <td className="px-3 py-2">
                   <span className="chip">{r.warrant_type}</span>
                 </td>
-                <td className="px-3 py-2 mono text-xs">
-                  {truncHash(r.author_b64)}
+                <td className="px-3 py-2 text-xs">
+                  <CopyableHash value={r.author_b64} />
                 </td>
-                <td className="px-3 py-2 mono text-xs">
-                  {truncHash(r.target_b64)}
+                <td className="px-3 py-2 text-xs">
+                  <CopyableHash value={r.target_b64} />
                 </td>
                 <td className="px-3 py-2">{relTime(r.ts_iso)}</td>
-                <td className="px-3 py-2 mono text-xs">{r.observer_id}</td>
-                <td className="px-3 py-2 mono text-xs">
-                  {truncHash(r.op_hash_b64, 10, 6)}
+                <td className="px-3 py-2 text-xs">
+                  <CopyableHash value={r.observer_id} />
+                </td>
+                <td className="px-3 py-2 text-xs">
+                  <CopyableHash value={r.op_hash_b64} head={10} tail={6} />
                 </td>
               </tr>
             ))}

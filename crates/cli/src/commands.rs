@@ -33,6 +33,7 @@ pub async fn status(cfg: &ObserverConfig) -> Result<()> {
 }
 
 pub async fn list_agents(cfg: &ObserverConfig, dna_b64: &str) -> Result<()> {
+    let dna_b64 = tag::normalize_hash(dna_b64);
     let snap = collect(cfg).await?;
     let d = snap
         .dnas
@@ -45,11 +46,13 @@ pub async fn list_agents(cfg: &ObserverConfig, dna_b64: &str) -> Result<()> {
 
 pub async fn list_warrants(cfg: &ObserverConfig, dna_b64: Option<&str>) -> Result<()> {
     let snap = collect(cfg).await?;
+    let dna_b64 = dna_b64.map(tag::normalize_hash);
     render::warrants(&snap, dna_b64);
     Ok(())
 }
 
 pub async fn coverage(cfg: &ObserverConfig, dna_b64: &str, n: i64) -> Result<()> {
+    let dna_b64 = tag::normalize_hash(dna_b64);
     let mut c = cfg.to_collector();
     c.validation_coverage_bottom_n = n;
     let snap = collect_with(&c).await?;
@@ -65,8 +68,20 @@ pub async fn coverage(cfg: &ObserverConfig, dna_b64: &str, n: i64) -> Result<()>
 pub fn export_chain(cfg: &ObserverConfig, dna_b64: &str, agent_b64: &str) -> Result<()> {
     let c = cfg.to_collector();
     let exporter = Exporter::new(&c);
-    let dna = holo_hash::DnaHash::try_from_raw_39(tag::b64url_decode(dna_b64)?)?;
-    let agent = holo_hash::AgentPubKey::try_from_raw_39(tag::b64url_decode(agent_b64)?)?;
+    let dna_bytes = tag::b64url_decode(dna_b64).map_err(|e| {
+        anyhow!(
+            "invalid dna hash {dna_b64:?}: {e}; expected 52-char base64url \
+             (optionally prefixed with `u`)"
+        )
+    })?;
+    let agent_bytes = tag::b64url_decode(agent_b64).map_err(|e| {
+        anyhow!(
+            "invalid agent hash {agent_b64:?}: {e}; expected 52-char base64url \
+             (optionally prefixed with `u`)"
+        )
+    })?;
+    let dna = holo_hash::DnaHash::try_from_raw_39(dna_bytes)?;
+    let agent = holo_hash::AgentPubKey::try_from_raw_39(agent_bytes)?;
     let path = exporter
         .agent_chain(&dna, &agent)
         .map_err(|e| anyhow!("export_chain: {e}"))?;
@@ -77,7 +92,13 @@ pub fn export_chain(cfg: &ObserverConfig, dna_b64: &str, agent_b64: &str) -> Res
 pub fn export_pending_ops(cfg: &ObserverConfig, dna_b64: &str) -> Result<()> {
     let c = cfg.to_collector();
     let exporter = Exporter::new(&c);
-    let dna = holo_hash::DnaHash::try_from_raw_39(tag::b64url_decode(dna_b64)?)?;
+    let dna_bytes = tag::b64url_decode(dna_b64).map_err(|e| {
+        anyhow!(
+            "invalid dna hash {dna_b64:?}: {e}; expected 52-char base64url \
+             (optionally prefixed with `u`)"
+        )
+    })?;
+    let dna = holo_hash::DnaHash::try_from_raw_39(dna_bytes)?;
     let path = exporter
         .pending_ops(&dna)
         .map_err(|e| anyhow!("export_pending_ops: {e}"))?;
@@ -116,24 +137,32 @@ pub fn refresh_now(config_path: &Path) -> Result<()> {
 pub fn tag(config_path: &Path, cmd: TagCommand) -> Result<()> {
     let mut cfg = config::load(config_path)?;
     match cmd {
-        TagCommand::Set { kind, b64, name } => match kind.as_str() {
-            "agent" => {
-                cfg.agent_tags.insert(b64, name);
+        TagCommand::Set { kind, b64, name } => {
+            let b64 = tag::normalize_hash(&b64).to_string();
+            match kind.as_str() {
+                "agent" => {
+                    cfg.agent_tags.insert(b64, name);
+                }
+                "dna" => {
+                    cfg.dna_tags.insert(b64, name);
+                }
+                other => {
+                    return Err(anyhow!("unknown tag kind: {other}, expected agent or dna"))
+                }
             }
-            "dna" => {
-                cfg.dna_tags.insert(b64, name);
+        }
+        TagCommand::Unset { kind, b64 } => {
+            let b64 = tag::normalize_hash(&b64).to_string();
+            match kind.as_str() {
+                "agent" => {
+                    cfg.agent_tags.remove(&b64);
+                }
+                "dna" => {
+                    cfg.dna_tags.remove(&b64);
+                }
+                other => return Err(anyhow!("unknown tag kind: {other}")),
             }
-            other => return Err(anyhow!("unknown tag kind: {other}, expected agent or dna")),
-        },
-        TagCommand::Unset { kind, b64 } => match kind.as_str() {
-            "agent" => {
-                cfg.agent_tags.remove(&b64);
-            }
-            "dna" => {
-                cfg.dna_tags.remove(&b64);
-            }
-            other => return Err(anyhow!("unknown tag kind: {other}")),
-        },
+        }
         TagCommand::List => {
             render::tags(&cfg.agent_tags, &cfg.dna_tags);
             return Ok(());

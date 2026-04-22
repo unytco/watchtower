@@ -1,11 +1,17 @@
 import { useOutletContext, Link } from "react-router-dom";
 import { useDnaAgents, useMetrics, useWarrants } from "../../api";
 import { Sparkline } from "../../components/Sparkline";
-import { labelForAgent, relTime, truncHash } from "../../lib/format";
+import { CopyableHash } from "../../components/CopyableHash";
+import { HelpTip } from "../../components/HelpTip";
+import { labelForAgent, relTime } from "../../lib/format";
+import {
+  formatMetric,
+  metricHelp,
+  metricLabels,
+  type MetricField,
+} from "../../lib/metricHelp";
 
 type Ctx = { dna: string };
-
-type MetricField = "integration_rate" | "lag_p50_ms" | "lag_p99_ms" | "pending_backlog";
 
 export function DnaOverview() {
   const { dna } = useOutletContext<Ctx>();
@@ -16,18 +22,26 @@ export function DnaOverview() {
   const metricRows = (metrics?.metrics ?? []).slice().sort((a, b) =>
     a.bucket_hour_iso.localeCompare(b.bucket_hour_iso),
   );
+  const lastBucket = metricRows[metricRows.length - 1]?.bucket_hour_iso;
 
   return (
     <div className="space-y-6">
       <section>
-        <h2 className="text-sm text-muted uppercase tracking-wider mb-2">
-          Last 24h
-        </h2>
+        <div className="flex items-baseline justify-between mb-2">
+          <h2 className="text-sm text-muted uppercase tracking-wider">
+            Last 24h
+          </h2>
+          {lastBucket && (
+            <div className="text-xs text-muted">
+              last bucket {relTime(lastBucket)}
+            </div>
+          )}
+        </div>
         <div className="bg-surface border border-border rounded p-4 space-y-2">
-          <SparkRow label="Integration rate" rows={metricRows} field="integration_rate" />
-          <SparkRow label="Lag p50 (ms)" rows={metricRows} field="lag_p50_ms" />
-          <SparkRow label="Lag p99 (ms)" rows={metricRows} field="lag_p99_ms" />
-          <SparkRow label="Pending backlog" rows={metricRows} field="pending_backlog" />
+          <SparkRow rows={metricRows} field="integration_rate" />
+          <SparkRow rows={metricRows} field="lag_p50_ms" />
+          <SparkRow rows={metricRows} field="lag_p99_ms" />
+          <SparkRow rows={metricRows} field="pending_backlog" />
           {metricRows.length === 0 && (
             <div className="text-xs text-muted">
               No hourly metrics yet — they roll up from the 5-minute cron.
@@ -53,8 +67,11 @@ export function DnaOverview() {
                 key={a.agent_b64}
                 className="flex items-center justify-between gap-2"
               >
-                <span className="mono text-xs truncate">
-                  {labelForAgent(a.agent_tag, a.agent_b64)}
+                <span className="text-xs truncate min-w-0">
+                  <CopyableHash
+                    value={a.agent_b64}
+                    label={labelForAgent(a.agent_tag, a.agent_b64)}
+                  />
                 </span>
                 <span className="mono text-xs">
                   {a.action_count.toLocaleString()}
@@ -83,8 +100,10 @@ export function DnaOverview() {
                 key={`${w.observer_id}-${w.op_hash_b64}`}
                 className="flex items-center justify-between gap-2"
               >
-                <span className="mono text-xs truncate">
-                  {w.warrant_type} · {truncHash(w.author_b64)}
+                <span className="text-xs truncate min-w-0 flex items-center gap-1">
+                  <span className="mono">{w.warrant_type}</span>
+                  <span aria-hidden className="text-muted">·</span>
+                  <CopyableHash value={w.author_b64} />
                 </span>
                 <span className="text-xs text-muted">{relTime(w.ts_iso)}</span>
               </li>
@@ -100,11 +119,9 @@ export function DnaOverview() {
 }
 
 function SparkRow({
-  label,
   rows,
   field,
 }: {
-  label: string;
   rows: Array<{ bucket_hour_iso: string } & Record<MetricField, number>>;
   field: MetricField;
 }) {
@@ -115,12 +132,17 @@ function SparkRow({
   const last = data[data.length - 1]?.value ?? 0;
   return (
     <div className="flex items-center gap-3">
-      <div className="w-36 text-xs text-muted">{label}</div>
-      <div className="flex-1 min-w-0">
-        <Sparkline data={data} height={40} />
+      <div className="w-36 text-xs text-muted flex items-center gap-1.5">
+        <span>{metricLabels[field]}</span>
+        <HelpTip label={`What is ${metricLabels[field]}?`}>
+          {metricHelp[field]}
+        </HelpTip>
       </div>
-      <div className="w-16 text-right mono text-sm">
-        {Number(last).toFixed(2)}
+      <div className="flex-1 min-w-0">
+        <Sparkline data={data} field={field} height={40} />
+      </div>
+      <div className="w-24 text-right mono text-sm">
+        {formatMetric(field, last)}
       </div>
     </div>
   );

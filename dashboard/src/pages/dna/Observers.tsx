@@ -1,6 +1,7 @@
 import { useOutletContext } from "react-router-dom";
 import { useDnaObservers } from "../../api";
 import { relTime } from "../../lib/format";
+import { CopyableHash } from "../../components/CopyableHash";
 
 type Ctx = { dna: string };
 
@@ -30,13 +31,15 @@ export function DnaObservers() {
           <tbody>
             {rows.map((o) => (
               <tr key={o.observer_id} className="border-t border-border">
-                <td className="px-3 py-2 mono">
-                  <span
-                    className={`inline-block w-2 h-2 rounded-full mr-2 ${
-                      o.is_healthy ? "bg-ok" : "bg-danger"
-                    }`}
-                  />
-                  {o.observer_id}
+                <td className="px-3 py-2">
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className={`inline-block w-2 h-2 rounded-full ${
+                        o.is_healthy ? "bg-ok" : "bg-danger"
+                      }`}
+                    />
+                    <CopyableHash value={o.observer_id} />
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-right mono">
                   {o.agents_seen.toLocaleString()}
