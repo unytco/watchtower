@@ -138,3 +138,55 @@ export interface BlockSummary {
   start_iso: string;
   end_iso: string;
 }
+
+// ---------------------------------------------------------------------------
+// Bridge-service reporter (POST /ingest/bridge).
+// ---------------------------------------------------------------------------
+// Posted by the bridge-orchestrator about every minute. Intentionally small
+// and decoupled from IngestPayload so the Holochain observer schema is not
+// affected. HMAC + replay protection headers are identical to /ingest.
+// ---------------------------------------------------------------------------
+
+export interface BridgeSelfHealth {
+  uptime_s: number;
+  binary_version: string;
+  last_cycle_at_iso: string | null;
+  last_cycle_ms: number | null;
+  consecutive_failed_cycles: number;
+  reconnect_failures_total: number;
+  reconnects_ok_total: number;
+  pressure_active: boolean;
+  pressure_consecutive: number;
+  stage_ejections_total: number;
+  is_stuck: boolean;
+  last_error: string | null;
+  last_error_at_iso: string | null;
+}
+
+export interface BridgeBacklog {
+  detected: number;
+  queued: number;
+  claimed: number;
+  in_flight: number;
+  succeeded_total: number;
+  failed_total: number;
+  oldest_queued_age_s: number | null;
+}
+
+export interface BridgeThroughput {
+  succeeded_1h: number;
+  failed_1h: number;
+  succeeded_24h: number;
+  failed_24h: number;
+  avg_time_to_succeed_s_24h: number | null;
+}
+
+export interface BridgePayload {
+  schema_version: number;
+  observer_id: string;
+  collected_at: string;
+  dna_b64: string;
+  self_health: BridgeSelfHealth;
+  backlog: BridgeBacklog;
+  throughput: BridgeThroughput;
+}

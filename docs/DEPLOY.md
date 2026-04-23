@@ -161,6 +161,24 @@ appear in the header switcher within one collection interval (60s by default).
 | Observer logs `401 unknown observer`                | D1 `observer_secrets` row missing. Rerun the `*-watchtower` target. |
 | Observer logs `409 schema mismatch`                 | `SCHEMA_VERSION` in `worker/wrangler.jsonc` differs from observer.   |
 
+### D1 migrations
+
+`make deploy` applies any pending migrations automatically before pushing
+Worker code, so in normal operation you do not need to think about schema
+sync. `deploy-worker.sh` runs the same `wrangler d1 migrations apply
+watchtower --remote` call that `bootstrap-d1.sh` uses, so bootstrap and
+deploy stay in lockstep.
+
+If you ever need to apply migrations standalone (for example to inspect
+the remote state without deploying code):
+
+```bash
+cd watchtower/worker
+pnpm exec wrangler d1 migrations apply watchtower --remote
+```
+
+The command is idempotent; already-applied migrations are skipped.
+
 ## Rollback
 
 - Worker: `cd worker && pnpm exec wrangler rollback`.

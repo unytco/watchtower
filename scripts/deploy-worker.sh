@@ -19,6 +19,9 @@ fi
 log "Installing worker dependencies..."
 (cd "$WORKER_DIR" && pnpm install --frozen-lockfile=false)
 
+log "Applying D1 migrations (remote)..."
+wrangler_in "$WORKER_DIR" d1 migrations apply watchtower --remote
+
 log "Deploying Worker..."
 wrangler_in "$WORKER_DIR" deploy
 

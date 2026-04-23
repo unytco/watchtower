@@ -223,7 +223,7 @@ impl HumanReadable for Action {
                     }
 
                     if action.contains_key("tag") {
-                        action["tag"] = transform_flatten_byte_array(&action["tag"])?;
+                        action["tag"] = transform_msgpack_blob(&action["tag"])?;
                     }
                 }
 
@@ -1012,9 +1012,70 @@ fn transform_msgpack_blob(input: &serde_json::Value) -> HcOpsResult<serde_json::
             .ok_or_else(|| HcOpsError::Other("Invalid msgpack blob".into()))?,
     )?;
 
-    match holochain_serialized_bytes::decode::<_, serde_json::Value>(&blob) {
-        Ok(as_json) => Ok(as_json),
+    match rmpv::decode::read_value(&mut &blob[..]) {
+        Ok(val) => Ok(msgpack_value_to_json(val)),
         Err(_) => transform_flatten_byte_array(input),
+    }
+}
+
+/// Convert an rmpv::Value (which supports all msgpack types including Binary
+/// and integer map keys) into a serde_json::Value. Binary data is encoded as a
+/// base64url string; integer map keys become strings; Ext values become a
+/// `{ "_ext_type": n, "_ext_data": "<b64url>" }` object.
+fn msgpack_value_to_json(val: rmpv::Value) -> serde_json::Value {
+    match val {
+        rmpv::Value::Nil => serde_json::Value::Null,
+        rmpv::Value::Boolean(b) => serde_json::Value::Bool(b),
+        rmpv::Value::Integer(i) => {
+            if let Some(n) = i.as_i64() {
+                serde_json::Value::Number(n.into())
+            } else if let Some(n) = i.as_u64() {
+                serde_json::Value::Number(n.into())
+            } else {
+                serde_json::Value::String(i.to_string())
+            }
+        }
+        rmpv::Value::F32(f) => serde_json::Number::from_f64(f64::from(f))
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        rmpv::Value::F64(f) => serde_json::Number::from_f64(f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        rmpv::Value::String(s) => {
+            serde_json::Value::String(s.into_str().unwrap_or_default().to_owned())
+        }
+        rmpv::Value::Binary(bytes) => {
+            serde_json::Value::String(base64::prelude::BASE64_URL_SAFE_NO_PAD.encode(&bytes))
+        }
+        rmpv::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(msgpack_value_to_json).collect())
+        }
+        rmpv::Value::Map(pairs) => {
+            let map: serde_json::Map<String, serde_json::Value> = pairs
+                .into_iter()
+                .map(|(k, v)| {
+                    let key = match k {
+                        rmpv::Value::String(s) => s.into_str().unwrap_or_default().to_owned(),
+                        rmpv::Value::Integer(i) => i.to_string(),
+                        other => format!("{other}"),
+                    };
+                    (key, msgpack_value_to_json(v))
+                })
+                .collect();
+            serde_json::Value::Object(map)
+        }
+        rmpv::Value::Ext(type_id, data) => {
+            let mut map = serde_json::Map::new();
+            map.insert(
+                "_ext_type".to_owned(),
+                serde_json::Value::Number(type_id.into()),
+            );
+            map.insert(
+                "_ext_data".to_owned(),
+                serde_json::Value::String(base64::prelude::BASE64_URL_SAFE_NO_PAD.encode(&data)),
+            );
+            serde_json::Value::Object(map)
+        }
     }
 }
 
@@ -1041,4 +1102,68 @@ fn transform_bytes_size(input: &serde_json::Value) -> HcOpsResult<serde_json::Va
     Ok(serde_json::Value::String(human_bytes::human_bytes(
         size as f64,
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bytes_as_json_array(bytes: &[u8]) -> serde_json::Value {
+        serde_json::Value::Array(
+            bytes
+                .iter()
+                .map(|b| serde_json::Value::Number((*b as u64).into()))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn decodes_link_tag_like_msgpack_array() {
+        // Equivalent to ["oracle", 1] in msgpack:
+        //   0x92 fixarray[2], 0xa6 fixstr[6] "oracle", 0x01
+        let bytes = [
+            0x92, 0xa6, b'o', b'r', b'a', b'c', b'l', b'e', 0x01,
+        ];
+
+        let out = transform_msgpack_blob(&bytes_as_json_array(&bytes))
+            .expect("msgpack decode should succeed");
+
+        assert_eq!(
+            out,
+            serde_json::json!(["oracle", 1]),
+            "expected decoded JSON, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn decodes_app_entry_with_embedded_binary_hash() {
+        // Equivalent to { "hash": <3 raw bytes> } where the hash is encoded
+        // with msgpack bin8. This is the scenario that was previously
+        // failing via `holochain_serialized_bytes::decode::<_, serde_json::Value>`
+        // because serde_json::Value has no Binary variant.
+        //   0x81 fixmap[1], 0xa4 fixstr[4] "hash", 0xc4 bin8, len=3, 1,2,3
+        let bytes = [0x81, 0xa4, b'h', b'a', b's', b'h', 0xc4, 0x03, 1, 2, 3];
+
+        let out = transform_msgpack_blob(&bytes_as_json_array(&bytes))
+            .expect("msgpack decode should succeed");
+
+        let expected_b64 = base64::prelude::BASE64_URL_SAFE_NO_PAD.encode([1u8, 2, 3]);
+        assert_eq!(out, serde_json::json!({ "hash": expected_b64 }));
+    }
+
+    #[test]
+    fn non_msgpack_bytes_fall_back_to_bytearray() {
+        // 0xda = str16: claims a 16-bit length that follows, but we supply
+        // neither the length nor the payload, so rmpv must return Err and we
+        // fall back to the existing ByteArray stringification.
+        let bytes = [0xdau8];
+
+        let out = transform_msgpack_blob(&bytes_as_json_array(&bytes))
+            .expect("fallback path should still succeed");
+
+        assert_eq!(
+            out,
+            serde_json::Value::String("ByteArray([218])".to_string())
+        );
+    }
 }

@@ -157,6 +157,53 @@ routes.get("/dnas/:dna/observers", async (c) => {
   return c.json({ observers: results });
 });
 
+// Bridge-service reporter view for a DNA. Returns empty arrays when the
+// DNA has no registered bridge reporter, so the dashboard can hide the
+// panel without 404 handling.
+routes.get("/dnas/:dna/bridge", async (c) => {
+  const dna = c.req.param("dna");
+  const hours = Number(c.req.query("hours") ?? 24);
+  const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+
+  const servicesQ = c.env.DB.prepare(
+    `SELECT observer_id, dna_b64, last_seen_iso, uptime_s, binary_version,
+            last_cycle_at_iso, last_cycle_ms,
+            consecutive_failed_cycles, reconnect_failures_total, reconnects_ok_total,
+            pressure_active, pressure_consecutive, stage_ejections_total,
+            is_stuck, last_error, last_error_at_iso, updated_at
+       FROM bridge_services
+      WHERE dna_b64 = ?
+      ORDER BY last_seen_iso DESC`,
+  ).bind(dna);
+  const backlogQ = c.env.DB.prepare(
+    `SELECT observer_id, dna_b64, collected_at,
+            detected, queued, claimed, in_flight,
+            succeeded_total, failed_total, oldest_queued_age_s, updated_at
+       FROM bridge_backlog
+      WHERE dna_b64 = ?
+      ORDER BY collected_at DESC`,
+  ).bind(dna);
+  const throughputQ = c.env.DB.prepare(
+    `SELECT observer_id, dna_b64, bucket_hour_iso,
+            succeeded, failed, avg_time_to_succeed_s
+       FROM bridge_throughput_ts
+      WHERE dna_b64 = ? AND bucket_hour_iso >= ?
+      ORDER BY bucket_hour_iso ASC`,
+  ).bind(dna, since);
+
+  const [services, backlog, throughput] = await Promise.all([
+    servicesQ.all(),
+    backlogQ.all(),
+    throughputQ.all(),
+  ]);
+
+  return c.json({
+    services: services.results,
+    backlog: backlog.results,
+    throughput: throughput.results,
+  });
+});
+
 routes.get("/warrants", async (c) => {
   const observerId = c.req.query("observer_id");
   const dna = c.req.query("dna");

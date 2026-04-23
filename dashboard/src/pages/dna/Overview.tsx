@@ -3,6 +3,7 @@ import { useDnaAgents, useMetrics, useWarrants } from "../../api";
 import { Sparkline } from "../../components/Sparkline";
 import { CopyableHash } from "../../components/CopyableHash";
 import { HelpTip } from "../../components/HelpTip";
+import { BridgeServicePanel } from "../../components/BridgeServicePanel";
 import { labelForAgent, relTime } from "../../lib/format";
 import {
   formatMetric,
@@ -49,6 +50,8 @@ export function DnaOverview() {
           )}
         </div>
       </section>
+
+      <BridgeServicePanel dna={dna} />
 
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-surface border border-border rounded p-4">

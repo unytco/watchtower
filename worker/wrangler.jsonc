@@ -9,9 +9,10 @@
     "enabled": true
   },
   "routes": [
-    { "pattern": "watchtower.unyt.dev/ingest",  "zone_name": "unyt.dev" },
-    { "pattern": "watchtower.unyt.dev/healthz", "zone_name": "unyt.dev" },
-    { "pattern": "watchtower.unyt.dev/api/*",   "zone_name": "unyt.dev" }
+    { "pattern": "watchtower.unyt.dev/ingest",   "zone_name": "unyt.dev" },
+    { "pattern": "watchtower.unyt.dev/ingest/*", "zone_name": "unyt.dev" },
+    { "pattern": "watchtower.unyt.dev/healthz",  "zone_name": "unyt.dev" },
+    { "pattern": "watchtower.unyt.dev/api/*",    "zone_name": "unyt.dev" }
   ],
   "d1_databases": [
     {

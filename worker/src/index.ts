@@ -3,6 +3,8 @@ import { cors } from "hono/cors";
 import type { Env } from "./types";
 import { verifyAndParse } from "./ingest";
 import { persist } from "./persist";
+import { verifyAndParseBridge } from "./ingest_bridge";
+import { persistBridge } from "./persist_bridge";
 import { scheduled as runScheduled } from "./cron";
 import { routes as apiRoutes } from "./routes";
 
@@ -27,6 +29,20 @@ app.post("/ingest", async (c) => {
     await persist(c.env, parsed.payload, parsed.rawBytes);
   } catch (e) {
     console.error("persist failed", e);
+    return c.text("persist failed", 500);
+  }
+  return c.json({ ok: true });
+});
+
+// Bridge-service reporter ingest. Separate path so the Holochain
+// observer schema is not affected; see worker/migrations/0002_bridge.sql.
+app.post("/ingest/bridge", async (c) => {
+  const parsed = await verifyAndParseBridge(c.req.raw, c.env);
+  if (parsed instanceof Response) return parsed;
+  try {
+    await persistBridge(c.env, parsed.payload);
+  } catch (e) {
+    console.error("persist bridge failed", e);
     return c.text("persist failed", 500);
   }
   return c.json({ ok: true });

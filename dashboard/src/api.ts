@@ -162,6 +162,65 @@ export function useDiff(
   }>(`/api/diff?${params}`, fetcher);
 }
 
+// ---------------------------------------------------------------------------
+// Bridge-service reporter (/api/dnas/:dna/bridge)
+// ---------------------------------------------------------------------------
+
+export interface BridgeService {
+  observer_id: string;
+  dna_b64: string;
+  last_seen_iso: string;
+  uptime_s: number;
+  binary_version: string;
+  last_cycle_at_iso: string | null;
+  last_cycle_ms: number | null;
+  consecutive_failed_cycles: number;
+  reconnect_failures_total: number;
+  reconnects_ok_total: number;
+  pressure_active: number;
+  pressure_consecutive: number;
+  stage_ejections_total: number;
+  is_stuck: number;
+  last_error: string | null;
+  last_error_at_iso: string | null;
+  updated_at: string;
+}
+
+export interface BridgeBacklogRow {
+  observer_id: string;
+  dna_b64: string;
+  collected_at: string;
+  detected: number;
+  queued: number;
+  claimed: number;
+  in_flight: number;
+  succeeded_total: number;
+  failed_total: number;
+  oldest_queued_age_s: number | null;
+  updated_at: string;
+}
+
+export interface BridgeThroughputRow {
+  observer_id: string;
+  dna_b64: string;
+  bucket_hour_iso: string;
+  succeeded: number;
+  failed: number;
+  avg_time_to_succeed_s: number | null;
+}
+
+export function useBridgeService(dna: string | undefined) {
+  return useSWR<{
+    services: BridgeService[];
+    backlog: BridgeBacklogRow[];
+    throughput: BridgeThroughputRow[];
+  }>(
+    dna ? `/api/dnas/${encodeURIComponent(dna)}/bridge` : null,
+    fetcher,
+    { refreshInterval: 30_000 },
+  );
+}
+
 export function useSearch(q: string) {
   return useSWR<{
     results: Array<{
