@@ -33,6 +33,11 @@ export function Layout() {
           </div>
         </div>
       </header>
+      <div className="border-b border-border bg-surface">
+        <div className="max-w-[1280px] mx-auto px-6 py-1.5 text-[11px] text-muted tracking-wide">
+          Watchtower is a work in progress — data model and UI may change.
+        </div>
+      </div>
       <main className="flex-1 max-w-[1280px] w-full mx-auto px-6 py-6">
         <Outlet />
       </main>
