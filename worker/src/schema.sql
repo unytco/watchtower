@@ -70,6 +70,13 @@ CREATE TABLE IF NOT EXISTS warrants (
   ts_iso                TEXT NOT NULL,
   first_seen_at         TEXT NOT NULL,
   updated_at            TEXT NOT NULL,
+  -- Tier-1 enrichment fields (added in 0003_warrant_details.sql). Nullable
+  -- so older observer payloads still ingest cleanly.
+  authored_ts_iso       TEXT,
+  integrated_ts_iso     TEXT,
+  validation_status     TEXT,
+  signature_b64         TEXT,
+  proof_summary_json    TEXT,
   PRIMARY KEY (observer_id, op_hash_b64)
 );
 CREATE INDEX IF NOT EXISTS idx_warrants_author ON warrants (author_b64);

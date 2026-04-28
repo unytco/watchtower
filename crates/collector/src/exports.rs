@@ -68,6 +68,55 @@ impl<'a> Exporter<'a> {
         Ok(path)
     }
 
+    /// Dump every integrated warrant in one DNA (or in every DNA if `dna`
+    /// is `None`) with full decoded proofs and warrantor signatures. The
+    /// observer's tags are not consulted; raw base64url hashes are written.
+    pub fn warrants(&self, dna: Option<&holo_hash::DnaHash>) -> Result<PathBuf> {
+        use unyt_watchtower_hc_store::readable::HumanReadableDisplay;
+        use unyt_watchtower_hc_store::retrieve;
+
+        let dnas: Vec<holo_hash::DnaHash> = match dna {
+            Some(d) => vec![d.clone()],
+            None => list_dna_dirs(&self.cfg.holochain.data_root)?,
+        };
+
+        let mut out: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        for d in &dnas {
+            let mut key = crate::tier1_key(self.cfg)?;
+            let mut dht = match retrieve::open_holochain_database(
+                &self.cfg.holochain.data_root,
+                &retrieve::DbKind::Dht,
+                d,
+                key.as_mut(),
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(dna = %d, error = %e, "skipping dna in warrants export");
+                    continue;
+                }
+            };
+            let records = retrieve::get_warrants(&mut dht).unwrap_or_default();
+            let pretty = <Vec<_> as HumanReadableDisplay>::as_human_readable_pretty(&records)
+                .map_err(|e| CollectorError::Other(format!("readable: {e}")))?;
+            let value: serde_json::Value = serde_json::from_str(&pretty)?;
+            out.insert(d.to_string(), value);
+        }
+
+        let suffix = match dna {
+            Some(d) => format!("{d}"),
+            None => "all".to_string(),
+        };
+        let path = self
+            .cfg
+            .exports_dir
+            .join(format!("warrants_{}_{}.json", suffix, Self::ts()));
+        let body = serde_json::to_string_pretty(&serde_json::Value::Object(out))?;
+        let mut file = self.open(&path)?;
+        use std::io::Write;
+        file.write_all(body.as_bytes())?;
+        Ok(path)
+    }
+
     /// Dump every pending op (including bodies) for one DNA.
     pub fn pending_ops(&self, dna: &holo_hash::DnaHash) -> Result<PathBuf> {
         use unyt_watchtower_hc_store::readable::HumanReadableDisplay;
@@ -171,4 +220,36 @@ pub struct PruneReport {
     pub removed_age: u32,
     pub removed_size: u32,
     pub bytes_removed: u64,
+}
+
+/// Enumerate every DNA the conductor has a DHT database for. Filenames in
+/// `{data_root}/databases/dht/` are the DNA hash in Holochain's canonical
+/// `uhC0k…` form (see `open_holochain_database`).
+fn list_dna_dirs(data_root: &Path) -> Result<Vec<holo_hash::DnaHash>> {
+    use std::str::FromStr;
+
+    let dir = data_root.join("databases").join("dht");
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        // SQLite sidecars (`-shm`, `-wal`) live next to the main DB.
+        if name.ends_with("-shm") || name.ends_with("-wal") {
+            continue;
+        }
+        match holo_hash::DnaHashB64::from_str(name) {
+            Ok(h) => out.push(h.into()),
+            Err(e) => {
+                tracing::debug!(file = %name, error = %e, "skipping non-DNA file in dht dir");
+            }
+        }
+    }
+    Ok(out)
 }

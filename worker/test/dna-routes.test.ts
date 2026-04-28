@@ -83,17 +83,43 @@ async function seed() {
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
     ).bind(OBS_X, DNA_B, AGENT_3, null, now, now, 7, 0, 0, now),
 
-    // Same warrant seen by both observers on DNA_A. DISTINCT dedup should make count = 1.
+    // Same warrant seen by both observers on DNA_A. DISTINCT dedup should
+    // make count = 1. OBS_X carries the full Tier-1 enrichment (validation
+    // status, integration timestamp, decoded proof); OBS_Y simulates an
+    // older observer that didn't ship the new fields yet, to cover the
+    // backfill path on `/api/warrants`.
+    DB.prepare(
+      `INSERT INTO warrants (observer_id, dna_b64, op_hash_b64, warrant_type, author_b64,
+             target_b64, ts_iso, first_seen_at, updated_at,
+             authored_ts_iso, integrated_ts_iso, validation_status, signature_b64,
+             proof_summary_json)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(
+      OBS_X,
+      DNA_A,
+      "op-1",
+      "InvalidChainOp",
+      AGENT_1,
+      AGENT_2,
+      now,
+      now,
+      now,
+      now,
+      now,
+      "Valid",
+      "sig-1",
+      JSON.stringify({
+        kind: "InvalidChainOp",
+        action_author_b64: AGENT_2,
+        action_hash_b64: "action-1",
+        chain_op_type: "StoreEntry",
+      }),
+    ),
     DB.prepare(
       `INSERT INTO warrants (observer_id, dna_b64, op_hash_b64, warrant_type, author_b64,
              target_b64, ts_iso, first_seen_at, updated_at)
        VALUES (?,?,?,?,?,?,?,?,?)`,
-    ).bind(OBS_X, DNA_A, "op-1", "invalid_chain", AGENT_1, AGENT_2, now, now, now),
-    DB.prepare(
-      `INSERT INTO warrants (observer_id, dna_b64, op_hash_b64, warrant_type, author_b64,
-             target_b64, ts_iso, first_seen_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
-    ).bind(OBS_Y, DNA_A, "op-1", "invalid_chain", AGENT_1, AGENT_2, now, now, now),
+    ).bind(OBS_Y, DNA_A, "op-1", "InvalidChainOp", AGENT_1, AGENT_2, now, now, now),
   ]);
 }
 
@@ -177,8 +203,25 @@ describe("DNA-scoped routes", () => {
     const body = await resp.json<{ warrants: unknown[] }>();
     expect(body.warrants.length).toBe(0);
     const respA = await SELF.fetch(`http://test/api/warrants?dna=${DNA_A}`);
-    const bodyA = await respA.json<{ warrants: unknown[] }>();
+    const bodyA = await respA.json<{ warrants: Record<string, unknown>[] }>();
     expect(bodyA.warrants.length).toBe(2);
+
+    // OBS_X carries the full Tier-1 enrichment payload.
+    const enriched = bodyA.warrants.find((w) => w.observer_id === OBS_X)!;
+    expect(enriched.validation_status).toBe("Valid");
+    expect(enriched.signature_b64).toBe("sig-1");
+    expect(enriched.integrated_ts_iso).toBeTypeOf("string");
+    expect(enriched.authored_ts_iso).toBeTypeOf("string");
+    expect(typeof enriched.proof_summary_json).toBe("string");
+    const proof = JSON.parse(enriched.proof_summary_json as string);
+    expect(proof.kind).toBe("InvalidChainOp");
+    expect(proof.chain_op_type).toBe("StoreEntry");
+
+    // OBS_Y simulates an older observer; the worker still returns the row
+    // with the enrichment fields as NULL.
+    const legacy = bodyA.warrants.find((w) => w.observer_id === OBS_Y)!;
+    expect(legacy.validation_status).toBeNull();
+    expect(legacy.proof_summary_json).toBeNull();
   });
 
   it("GET /api/diff?dna= scopes counts to that DNA", async () => {

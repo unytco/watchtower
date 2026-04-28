@@ -95,16 +95,62 @@ pub struct AgentSummary {
     pub warrants_against: u32,
 }
 
-/// A single warrant op. The heavy warrant body (who they cheated, what the
-/// conflicting ops were) lives in Tier-2 export files; here we only keep
-/// small identifiers.
+/// A single warrant op. The heavy warrant body (the actions' full signed
+/// blobs, the surrounding chain) lives in Tier-2 export files; here we keep
+/// short identifiers plus a structured summary of the proof so the CLI and
+/// dashboard can render typed information without a Debug-string round-trip.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WarrantSummary {
     pub op_hash_b64: String,
+    /// Short kind tag (e.g. `"ChainFork"`, `"InvalidChainOp"`,
+    /// `"ChainIntegrity:Other"`). Cheap to filter on; for full details see
+    /// [`WarrantSummary::proof_summary`].
     pub warrant_type: String,
     pub author_b64: String,
     pub target_b64: String,
+    /// Warrant's own `timestamp` (when the warrantor authored the warrant).
     pub ts_iso: String,
+
+    /// Op's `authored_timestamp` from the DhtOp row (may differ from
+    /// `ts_iso` if the warrant was re-published).
+    pub authored_ts_iso: String,
+    /// `when_integrated` from the DhtOp row, if the op has been integrated.
+    pub integrated_ts_iso: Option<String>,
+    /// Validation status of the warrant op itself: `"Valid"` means the
+    /// warrant was accepted (the warrantee did misbehave), `"Rejected"`
+    /// means the warrantor was wrong, `"Abandoned"` means dependencies
+    /// never resolved.
+    pub validation_status: Option<String>,
+    /// Warrantor's signature over the warrant body, base64url no-pad.
+    pub signature_b64: String,
+    /// Decoded summary of the proof. Inner hashes are kept; inner
+    /// signatures and full action blobs are dropped from Tier-1.
+    pub proof_summary: WarrantProofSummary,
+}
+
+/// Decoded `WarrantProof` for Tier-1. We only carry small identifiers
+/// (action hashes, agent pubkeys, op-type tag); larger blobs (signatures
+/// over actions, full signed actions) live in Tier-2 export files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum WarrantProofSummary {
+    /// A single op authored on `action_author`'s chain that failed
+    /// validation when judged as `chain_op_type`.
+    InvalidChainOp {
+        action_author_b64: String,
+        action_hash_b64: String,
+        chain_op_type: String,
+    },
+    /// Two actions at the same chain seq prove `chain_author` forked
+    /// their chain.
+    ChainFork {
+        chain_author_b64: String,
+        action_a_hash_b64: String,
+        action_b_hash_b64: String,
+    },
+    /// Forward-compatibility fallback for warrant variants we don't
+    /// know how to decode yet. `kind` carries the variant name.
+    Other { description: String },
 }
 
 /// Per-(dna, agent) chain shape summary. Cheap to fetch, useful to show

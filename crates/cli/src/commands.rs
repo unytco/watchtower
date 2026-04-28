@@ -1,14 +1,14 @@
+use crate::TagCommand;
 use crate::config::{self, ObserverConfig};
 use crate::render;
-use crate::TagCommand;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use ham::is_connection_error;
 use holochain_client::WebsocketConfig;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use unyt_watchtower_collector::{collect_node_snapshot, Exporter};
+use unyt_watchtower_collector::{Exporter, collect_node_snapshot};
 use unyt_watchtower_core::tag;
 
 /// Per-request timeout applied to every admin websocket call from the CLI.
@@ -106,6 +106,28 @@ pub fn export_pending_ops(cfg: &ObserverConfig, dna_b64: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn export_warrants(cfg: &ObserverConfig, dna_b64: Option<&str>) -> Result<()> {
+    let c = cfg.to_collector();
+    let exporter = Exporter::new(&c);
+    let dna = match dna_b64 {
+        Some(s) => {
+            let bytes = tag::b64url_decode(s).map_err(|e| {
+                anyhow!(
+                    "invalid dna hash {s:?}: {e}; expected 52-char base64url \
+                     (optionally prefixed with `u`)"
+                )
+            })?;
+            Some(holo_hash::DnaHash::try_from_raw_39(bytes)?)
+        }
+        None => None,
+    };
+    let path = exporter
+        .warrants(dna.as_ref())
+        .map_err(|e| anyhow!("export_warrants: {e}"))?;
+    println!("wrote {}", path.display());
+    Ok(())
+}
+
 pub fn export_state_dump(cfg: &ObserverConfig, input: &Path) -> Result<()> {
     let c = cfg.to_collector();
     let exporter = Exporter::new(&c);
@@ -146,9 +168,7 @@ pub fn tag(config_path: &Path, cmd: TagCommand) -> Result<()> {
                 "dna" => {
                     cfg.dna_tags.insert(b64, name);
                 }
-                other => {
-                    return Err(anyhow!("unknown tag kind: {other}, expected agent or dna"))
-                }
+                other => return Err(anyhow!("unknown tag kind: {other}, expected agent or dna")),
             }
         }
         TagCommand::Unset { kind, b64 } => {

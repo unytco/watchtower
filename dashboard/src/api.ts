@@ -77,6 +77,43 @@ export interface Warrant {
   author_b64: string;
   target_b64: string;
   ts_iso: string;
+  authored_ts_iso: string | null;
+  integrated_ts_iso: string | null;
+  validation_status: string | null;
+  signature_b64: string | null;
+  /// Worker stores the structured proof summary as JSON text. Parsed on
+  /// render so unknown variants don't blow up `JSON.parse` upstream.
+  proof_summary_json: string | null;
+}
+
+export type WarrantProofSummary =
+  | {
+      kind: "InvalidChainOp";
+      action_author_b64: string;
+      action_hash_b64: string;
+      chain_op_type: string;
+    }
+  | {
+      kind: "ChainFork";
+      chain_author_b64: string;
+      action_a_hash_b64: string;
+      action_b_hash_b64: string;
+    }
+  | { kind: "Other"; description: string };
+
+export function parseProofSummary(
+  raw: string | null,
+): WarrantProofSummary | null {
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === "object" && typeof obj.kind === "string") {
+      return obj as WarrantProofSummary;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export interface MetricPoint {

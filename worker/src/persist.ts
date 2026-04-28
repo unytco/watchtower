@@ -161,12 +161,23 @@ function pushDna(
   }
 
   for (const w of d.warrants) {
+    const proofJson = w.proof_summary
+      ? JSON.stringify(w.proof_summary)
+      : null;
     batch.push(
       env.DB.prepare(
         `INSERT INTO warrants (observer_id, dna_b64, op_hash_b64, warrant_type,
-                              author_b64, target_b64, ts_iso, first_seen_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              author_b64, target_b64, ts_iso, first_seen_at, updated_at,
+                              authored_ts_iso, integrated_ts_iso, validation_status,
+                              signature_b64, proof_summary_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(observer_id, op_hash_b64) DO UPDATE SET
+           warrant_type = excluded.warrant_type,
+           authored_ts_iso = excluded.authored_ts_iso,
+           integrated_ts_iso = excluded.integrated_ts_iso,
+           validation_status = excluded.validation_status,
+           signature_b64 = excluded.signature_b64,
+           proof_summary_json = excluded.proof_summary_json,
            updated_at = excluded.updated_at`,
       ).bind(
         observer_id,
@@ -178,6 +189,11 @@ function pushDna(
         w.ts_iso,
         collected_at,
         collected_at,
+        w.authored_ts_iso ?? null,
+        w.integrated_ts_iso ?? null,
+        w.validation_status ?? null,
+        w.signature_b64 ?? null,
+        proofJson,
       ),
     );
     batch.push(

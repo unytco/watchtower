@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use tabled::{settings::Style, Table, Tabled};
-use unyt_watchtower_core::{DnaSnapshot, NodeSnapshot};
+use unyt_watchtower_core::{DnaSnapshot, NodeSnapshot, WarrantProofSummary, WarrantSummary};
 
 pub fn status(snap: &NodeSnapshot, observer_id: &str) {
     println!("observer: {observer_id}");
@@ -56,8 +56,11 @@ struct WarrantRow {
     dna: String,
     ts: String,
     typ: String,
+    status: String,
+    integrated: String,
     author: String,
     target: String,
+    proof: String,
 }
 
 pub fn warrants(snap: &NodeSnapshot, filter: Option<&str>) {
@@ -74,8 +77,17 @@ pub fn warrants(snap: &NodeSnapshot, filter: Option<&str>) {
                 dna: dna_name.clone(),
                 ts: w.ts_iso.clone(),
                 typ: w.warrant_type.clone(),
+                status: w
+                    .validation_status
+                    .clone()
+                    .unwrap_or_else(|| "—".to_string()),
+                integrated: w
+                    .integrated_ts_iso
+                    .clone()
+                    .unwrap_or_else(|| "pending".to_string()),
                 author: truncate(&w.author_b64),
                 target: truncate(&w.target_b64),
+                proof: proof_one_line(w),
             });
         }
     }
@@ -86,6 +98,26 @@ pub fn warrants(snap: &NodeSnapshot, filter: Option<&str>) {
     let mut t = Table::new(rows);
     t.with(Style::rounded());
     println!("{t}");
+}
+
+fn proof_one_line(w: &WarrantSummary) -> String {
+    match &w.proof_summary {
+        WarrantProofSummary::InvalidChainOp {
+            action_hash_b64,
+            chain_op_type,
+            ..
+        } => format!("{} {}", chain_op_type, truncate(action_hash_b64)),
+        WarrantProofSummary::ChainFork {
+            action_a_hash_b64,
+            action_b_hash_b64,
+            ..
+        } => format!(
+            "fork {} / {}",
+            truncate(action_a_hash_b64),
+            truncate(action_b_hash_b64)
+        ),
+        WarrantProofSummary::Other { description } => description.clone(),
+    }
 }
 
 #[derive(Tabled)]

@@ -76,7 +76,27 @@ export interface WarrantSummary {
   author_b64: string;
   target_b64: string;
   ts_iso: string;
+  authored_ts_iso: string;
+  integrated_ts_iso: string | null;
+  validation_status: string | null;
+  signature_b64: string;
+  proof_summary: WarrantProofSummary;
 }
+
+export type WarrantProofSummary =
+  | {
+      kind: "InvalidChainOp";
+      action_author_b64: string;
+      action_hash_b64: string;
+      chain_op_type: string;
+    }
+  | {
+      kind: "ChainFork";
+      chain_author_b64: string;
+      action_a_hash_b64: string;
+      action_b_hash_b64: string;
+    }
+  | { kind: "Other"; description: string };
 
 export interface ChainSummary {
   agent_b64: string;

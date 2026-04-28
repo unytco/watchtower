@@ -188,6 +188,9 @@ pub struct DhtMeta {
     pub validation_stage: Option<ValidationStage>,
     pub num_validation_attempts: Option<u32>,
     pub last_validation_attempt: Option<Timestamp>,
+    /// `when_integrated` from the `DhtOp` row, if the op has been integrated
+    /// into the DHT. Microsecond Holochain timestamp.
+    pub when_integrated: Option<Timestamp>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -256,6 +259,7 @@ impl TryFrom<DbDhtOp> for ChainOp<DhtMeta> {
             validation_stage: value.validation_stage,
             num_validation_attempts: value.num_validation_attempts.map(|v| v as u32),
             last_validation_attempt: value.last_validation_attempt.map(Timestamp),
+            when_integrated: value.when_integrated.map(Timestamp),
         };
 
         let common: ChainOp = value.try_into()?;

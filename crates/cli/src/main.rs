@@ -72,6 +72,15 @@ enum Command {
         dna: String,
     },
 
+    /// Dump every integrated warrant (with full decoded proof and warrantor
+    /// signature) for a DNA, or for every DNA on this conductor when `--dna`
+    /// is omitted.
+    ExportWarrants {
+        /// DNA hash. Accepts `uhC0k…` (Holochain canonical) or `hC0k…` (dashboard).
+        #[arg(long)]
+        dna: Option<String>,
+    },
+
     /// Convert an `hc dump-state` JSON into readable form.
     ExportStateDump {
         #[arg(long)]
@@ -122,6 +131,7 @@ async fn main() -> Result<()> {
         Command::Coverage { dna, n } => commands::coverage(&cfg, &dna, n).await,
         Command::ExportChain { dna, agent } => commands::export_chain(&cfg, &dna, &agent),
         Command::ExportPendingOps { dna } => commands::export_pending_ops(&cfg, &dna),
+        Command::ExportWarrants { dna } => commands::export_warrants(&cfg, dna.as_deref()),
         Command::ExportStateDump { input } => commands::export_state_dump(&cfg, &input),
         Command::RefreshNow => commands::refresh_now(&cli.config),
         Command::Tag { cmd } => commands::tag(&cli.config, cmd),
