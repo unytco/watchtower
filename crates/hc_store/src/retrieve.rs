@@ -1,3 +1,32 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Copyright (C) 2025-2026 ThetaSinner <ThetaSinner@users.noreply.github.com>
+// Upstream: https://github.com/ThetaSinner/hc-ops
+// Copyright (C) 2025-2026 Unyt contributors (this modified version)
+//
+// This file is vendored from ThetaSinner/hc-ops @
+// b7359a7d4b8d8e5021eb0645eae30f90bc1301d0. Last sync: 2026-04.
+// Sync procedure: see watchtower/AGENTS.md "Syncing `hc_store` from
+// upstream `hc-ops`".
+//
+// Modifications: added `list_authored_identities` and helpers
+// `parse_authored_db_name`, `decode_display_hash_bytes`; removed upstream's
+// `get_installed_apps` and `ConductorStateView` (unused by watchtower);
+// otherwise tracks upstream.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful, but
+// WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 use crate::{HcOpsError, HcOpsResult};
 use diesel::{Connection, RunQueryDsl, SqliteConnection, sql_query};
 use holo_hash::{ActionHash, EntryHash};
@@ -635,9 +664,7 @@ fn decode_display_hash_bytes(display: &str) -> HcOpsResult<Vec<u8>> {
     use base64::Engine;
 
     let body = display.strip_prefix('u').ok_or_else(|| {
-        HcOpsError::Other(
-            format!("hash string {display:?} missing 'u' prefix").into(),
-        )
+        HcOpsError::Other(format!("hash string {display:?} missing 'u' prefix").into())
     })?;
     base64::prelude::BASE64_URL_SAFE_NO_PAD
         .decode(body)

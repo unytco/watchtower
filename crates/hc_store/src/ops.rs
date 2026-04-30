@@ -1,3 +1,29 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Copyright (C) 2025-2026 ThetaSinner <ThetaSinner@users.noreply.github.com>
+// Upstream: https://github.com/ThetaSinner/hc-ops
+// Copyright (C) 2025-2026 Unyt contributors (this modified version)
+//
+// This file is vendored from ThetaSinner/hc-ops @
+// b7359a7d4b8d8e5021eb0645eae30f90bc1301d0. Last sync: 2026-04.
+// Sync procedure: see watchtower/AGENTS.md "Syncing `hc_store` from
+// upstream `hc-ops`".
+//
+// Modifications: none — tracks upstream verbatim.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful, but
+// WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 use crate::{HcOpsError, HcOpsResult};
 use futures::FutureExt;
 use futures::future::BoxFuture;

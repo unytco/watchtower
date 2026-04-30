@@ -1,3 +1,33 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Copyright (C) 2025-2026 ThetaSinner <ThetaSinner@users.noreply.github.com>
+// Upstream: https://github.com/ThetaSinner/hc-ops
+// Copyright (C) 2025-2026 Unyt contributors (this modified version)
+//
+// This file is vendored from ThetaSinner/hc-ops @
+// b7359a7d4b8d8e5021eb0645eae30f90bc1301d0. Last sync: 2026-04.
+// Sync procedure: see watchtower/AGENTS.md "Syncing `hc_store` from
+// upstream `hc-ops`".
+//
+// Modifications: rewrote `transform_msgpack_blob` to decode via `rmpv`
+// (handles `Binary` payloads and integer map keys) instead of
+// `holochain_serialized_bytes::decode`; added the `msgpack_value_to_json`
+// helper; switched action `tag` field handling to `transform_msgpack_blob`;
+// otherwise tracks upstream.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful, but
+// WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+// General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 use crate::retrieve::{BlockRecord, ChainOp, ChainRecord, Record, WarrantRecord};
 use crate::{HcOpsError, HcOpsResult, HcOpsResultContextExt};
 use base64::Engine;
@@ -1121,9 +1151,7 @@ mod tests {
     fn decodes_link_tag_like_msgpack_array() {
         // Equivalent to ["oracle", 1] in msgpack:
         //   0x92 fixarray[2], 0xa6 fixstr[6] "oracle", 0x01
-        let bytes = [
-            0x92, 0xa6, b'o', b'r', b'a', b'c', b'l', b'e', 0x01,
-        ];
+        let bytes = [0x92, 0xa6, b'o', b'r', b'a', b'c', b'l', b'e', 0x01];
 
         let out = transform_msgpack_blob(&bytes_as_json_array(&bytes))
             .expect("msgpack decode should succeed");

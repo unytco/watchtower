@@ -1,4 +1,15 @@
-//! Vendored data layer from `hc-ops` (commit pinned in `README.md`).
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Copyright (C) 2025-2026 Unyt contributors. Portions derived from
+// ThetaSinner/hc-ops (GPL-3.0); see retrieve.rs, ops.rs, readable.rs for
+// upstream copyright notices.
+
+//! Vendored data layer from `ThetaSinner/hc-ops` (GPL-3.0). The
+//! current upstream rev and the sync procedure are documented in
+//! [`watchtower/AGENTS.md`](../../AGENTS.md) under "Syncing `hc_store`
+//! from upstream `hc-ops`"; the per-file `Vendored from … @ <sha>`
+//! markers at the top of `retrieve.rs`, `ops.rs`, and `readable.rs` are
+//! the source of truth for the rev.
 //!
 //! Anything that talks directly to Holochain SQLite or the admin websocket
 //! lives here. The collector builds on top of this.
@@ -6,6 +17,9 @@
 //! Keep this crate free of DTOs that belong in `crates/core`; this crate
 //! returns Holochain-native types (`ChainOp<DhtMeta>`, `ChainRecord`, …) and
 //! the collector maps them to Tier-1 summaries.
+//!
+//! Watchtower-specific additions live in [`extensions`] and as
+//! `retrieve::list_authored_identities` — preserve those when syncing.
 
 pub mod extensions;
 pub mod ops;

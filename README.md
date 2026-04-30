@@ -47,3 +47,16 @@ worker/          Cloudflare Worker (Hono) + D1 migrations
 dashboard/       Cloudflare Pages (Vite + React + shadcn)
 release/         binary release artifacts (populated by CI)
 ```
+
+## License
+
+Watchtower is licensed under [GPL-3.0-or-later](LICENSE) because it
+vendors data-layer sources from
+[ThetaSinner/hc-ops](https://github.com/ThetaSinner/hc-ops) (also
+GPL-3.0) into [`crates/hc_store/`](crates/hc_store/). New
+contributions to the Rust workspace must be GPL-3.0-compatible.
+
+The TypeScript `worker/` and `dashboard/` subprojects communicate
+with the observer over HTTP and do not link the GPL Rust code; they
+are not subject to GPL by virtue of that boundary, and may be
+licensed independently in their own `package.json`.

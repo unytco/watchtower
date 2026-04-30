@@ -13,6 +13,16 @@ Worker** (TS) that ingests + persists to D1, and a **dashboard**
 `service` — observer is deployed via `automation/`; worker + dashboard
 deploy via Wrangler.
 
+## License
+
+`GPL-3.0-or-later` for the Rust workspace. This is forced by
+the GPL-3.0 ancestry of [`crates/hc_store/`](crates/hc_store/)
+(vendored from `ThetaSinner/hc-ops`) and applies to every binary
+built from this workspace (observer daemon, CLI). New Rust code
+must be GPL-3.0-compatible. See [Syncing `hc_store` from upstream
+`hc-ops`](#syncing-hc_store-from-upstream-hc-ops) for the vendor
+mechanics.
+
 ## Stack
 
 - Rust workspace at root ([`Cargo.toml`](Cargo.toml),
@@ -84,9 +94,84 @@ nix develop -c cargo test                      # Rust workspace
 
 - Vendors [`hc-chain-doc`](../hc-chain-doc/) as
   [`crates/chain_doc/`](crates/chain_doc/) — keep them in sync.
+- Vendors `ThetaSinner/hc-ops` (**GPL-3.0**, sibling on disk at
+  [`../hc-ops/`](../hc-ops/), **untracked / read-only — we have no
+  write access**) as
+  [`crates/hc_store/src/{retrieve,ops,readable}.rs`](crates/hc_store/src/).
+  This is what forces the workspace to GPL-3.0-or-later. See
+  [Syncing `hc_store` from upstream `hc-ops`](#syncing-hc_store-from-upstream-hc-ops).
 - Uses [`ham`](../ham/) for the observer's Holochain
   `AppWebsocket` connection.
 - Deployed by [`automation/`](../automation/).
+
+## Syncing `hc_store` from upstream `hc-ops`
+
+[`crates/hc_store/`](crates/hc_store/) is a **read-only vendor** of
+`ThetaSinner/hc-ops` (GPL-3.0). We have no write access to that
+upstream — fixes for any data-layer bug must land watchtower-side
+first, and may flow upstream later via a separately-coordinated PR
+if/when ThetaSinner is open to it. The three vendored files
+([`retrieve.rs`](crates/hc_store/src/retrieve.rs),
+[`ops.rs`](crates/hc_store/src/ops.rs),
+[`readable.rs`](crates/hc_store/src/readable.rs)) carry per-file
+`Vendored from ThetaSinner/hc-ops @ <sha>` markers; those markers are
+the source of truth for which upstream rev we're tracking. Watchtower-
+specific additions live in
+[`crates/hc_store/src/extensions.rs`](crates/hc_store/src/extensions.rs)
+and as `retrieve::list_authored_identities` — these are NOT in
+upstream, must be preserved on every sync, and should not bleed into
+the verbatim files.
+
+### When to sync
+
+Sync only when motivated by a concrete need:
+
+- A bug in upstream data parsing (op decoding, action decoding,
+  SQLCipher key handling) that we hit and need a fix for.
+- A new API in upstream we want to expose through watchtower.
+- A Holochain dep bump on our side that requires upstream's adapter
+  changes to compile.
+
+Don't sync just to "stay current" — each sync is manual labor and
+risks regressing watchtower-specific extensions.
+
+### How to sync (5 steps)
+
+1. `cd ../hc-ops && git fetch && git checkout <rev>` where
+   `<rev>`'s `Cargo.toml` `holochain_*` / `kitsune2_*` /
+   `holochain_serialized_bytes` versions match watchtower's
+   [`[workspace.dependencies]`](Cargo.toml).
+2. For each of `retrieve.rs`, `retrieve/`, `ops.rs`, `readable.rs`:
+   diff `../hc-ops/src/<file>` against
+   `watchtower/crates/hc_store/src/<file>`; adopt upstream changes.
+   Preserve `list_authored_identities` (in `retrieve.rs`) and the
+   entire [`crates/hc_store/src/extensions.rs`](crates/hc_store/src/extensions.rs)
+   module — those are watchtower-specific additions, not in
+   upstream.
+3. Update the `Vendored from ThetaSinner/hc-ops @ <sha>` markers at
+   the top of those files to the new rev, and bump the `Last sync:`
+   line.
+4. `nix develop -c cargo check --workspace`, then
+   `nix develop -c cargo test --workspace`.
+5. Commit with message `hc_store: sync to hc-ops <short-sha>`.
+
+### When to migrate to a real Cargo dep
+
+Defer the migration from vendoring to
+`hc_ops = { git = "...", rev = "..." }` until **all three** of these
+are true:
+
+1. `hc-ops` upstream's `holochain_*` rc tags match watchtower's
+   `[workspace.dependencies]`.
+2. `hc-ops` drops the forked `serde_json`
+   (`git = "https://github.com/ThetaSinner/json.git"`) — or we
+   accept a `[patch.crates-io]` in watchtower's workspace pinning
+   everyone to one fork.
+3. `hc-ops` splits its `discover` default feature so a library
+   consumer can `default-features = false` cleanly without losing
+   the lib API.
+
+Until then, vendor + sync is the path with the lowest blast radius.
 
 ## Changelog
 
@@ -110,6 +195,14 @@ them.
   [`../hc-chain-doc/`](../hc-chain-doc/) first, then sync into
   [`crates/chain_doc/`](crates/chain_doc/). Never edit the vendor
   copy directly.
+- **Vendored `hc_store` is GPL-3.0 upstream.** Sourced from
+  `ThetaSinner/hc-ops` — we do not have write access. Sync
+  watchtower-side only, preserving `list_authored_identities` and the
+  entire [`extensions`](crates/hc_store/src/extensions.rs) module.
+  This vendor is what makes the whole Rust workspace
+  GPL-3.0-or-later; do not vendor additional GPL code without
+  explicit review. Full procedure in [Syncing `hc_store` from upstream
+  `hc-ops`](#syncing-hc_store-from-upstream-hc-ops).
 - **Worker stays small.** Heavy compute belongs in the observer
   daemon (which has more memory and CPU); the worker should be a
   thin ingest + read API.
