@@ -1,16 +1,15 @@
 # watchtower — Agent Instructions
 
+> **This repo follows the workshop root's patterns — it does not define its own.** Development workflow, process, changelog conventions, and spec/feature-doc discipline live in the workshop: [`CLAUDE.md`](../CLAUDE.md), [`AGENTS.md`](../AGENTS.md), [`documentation/DEVELOPMENT_WORKFLOW.md`](../documentation/DEVELOPMENT_WORKFLOW.md). Below is only what's specific to THIS repo.
+
 ## Purpose
 
-Observability stack for the Unyt network: an **observer daemon**
-(Rust) that watches a local Holochain conductor and emits structured
-metrics, a **CLI** (Rust) for one-shot inspection, a **Cloudflare
-Worker** (TS) that ingests + persists to D1, and a **dashboard**
-(SvelteKit / Vite + Cloudflare Pages) that reads the worker's API.
-
-## Classification
-
-`service` — observer is deployed via `automation/`; worker + dashboard
+`service` — observability stack for the Unyt network: an **observer
+daemon** (Rust) that watches a local Holochain conductor and emits
+structured metrics, a **CLI** (Rust) for one-shot inspection, a
+**Cloudflare Worker** (TS) that ingests + persists to D1, and a
+**dashboard** (SvelteKit / Vite + Cloudflare Pages) that reads the
+worker's API. Observer deploys via `automation/`; worker + dashboard
 deploy via Wrangler.
 
 ## License
@@ -90,20 +89,6 @@ nix develop -c cargo test                      # Rust workspace
 - **Dashboard**: `( cd dashboard && npx wrangler pages deploy dist )`
   after `npm run build`.
 
-## Related repos in workshop
-
-- Vendors [`hc-chain-doc`](../hc-chain-doc/) as
-  [`crates/chain_doc/`](crates/chain_doc/) — keep them in sync.
-- Vendors `ThetaSinner/hc-ops` (**GPL-3.0**, sibling on disk at
-  [`../hc-ops/`](../hc-ops/), **untracked / read-only — we have no
-  write access**) as
-  [`crates/hc_store/src/{retrieve,ops,readable}.rs`](crates/hc_store/src/).
-  This is what forces the workspace to GPL-3.0-or-later. See
-  [Syncing `hc_store` from upstream `hc-ops`](#syncing-hc_store-from-upstream-hc-ops).
-- Uses [`ham`](../ham/) for the observer's Holochain
-  `AppWebsocket` connection.
-- Deployed by [`automation/`](../automation/).
-
 ## Syncing `hc_store` from upstream `hc-ops`
 
 [`crates/hc_store/`](crates/hc_store/) is a **read-only vendor** of
@@ -173,21 +158,11 @@ are true:
 
 Until then, vendor + sync is the path with the lowest blast radius.
 
-## Changelog
-
-File: [`./CHANGELOG.md`](./CHANGELOG.md). Format: [Keep a Changelog
-1.1.0](https://keepachangelog.com/en/1.1.0/) with `## [Unreleased]`
-at the top and standard subsections. One bullet per agent change,
-≤120 chars, present-tense imperative. Branch-type → section mapping
-per workshop
-[`branch-and-pr-workflow.mdc`](../.cursor/rules/branch-and-pr-workflow.mdc).
-
-Worker schema migrations (D1) and dashboard API contract changes
-MUST appear under `### Changed` — operators redeploying need to read
-them.
-
 ## Repo-specific rules
 
+- **Worker schema migrations (D1) and dashboard API contract changes
+  MUST appear in `CHANGELOG.md` under `### Changed`** — operators
+  redeploying need to read them.
 - **Observer must not panic on bad input.** Production data is
   hostile; classify and log unknown shapes, never crash the
   long-running daemon.
@@ -206,9 +181,3 @@ them.
 - **Worker stays small.** Heavy compute belongs in the observer
   daemon (which has more memory and CPU); the worker should be a
   thin ingest + read API.
-
-## Lessons learned
-
-_Append entries here whenever an agent (or human) loses time to
-something a guardrail would have prevented. Keep each entry: date,
-short symptom, concrete fix._
