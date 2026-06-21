@@ -44,29 +44,51 @@ routes.get("/dnas", async (c) => {
   return c.json({ dnas: results });
 });
 
-// Per-DNA tile numbers.
+// Per-DNA tile numbers. `agents_closed` / `agents_opened` are the migration
+// counters: one count per agent whose migration flag is set on ANY observer
+// (MAX across observers, since a close/open is monotonic), so they read zero
+// outside a window and rise as fleet agents migrate.
 routes.get("/dnas/:dna/summary", async (c) => {
   const dna = c.req.param("dna");
   const row = await c.env.DB.prepare(
-    `SELECT
-       (SELECT COUNT(DISTINCT agent_b64) FROM agents_discovered WHERE dna_b64 = ?1)             AS agents,
-       (SELECT COALESCE(SUM(ac), 0) FROM (
-            SELECT MAX(action_count) AS ac
+    `WITH per_agent AS (
+            -- One pass over agents_discovered, one row per agent: MAX dedups a
+            -- close/open seen by ANY observer to a single fact (a close/open is
+            -- monotonic). Both migration counters and total_actions read from
+            -- this so the table is grouped once, not three times.
+            SELECT MAX(chain_closed)            AS closed,
+                   MAX(opening_summary_present) AS opened,
+                   MAX(action_count)            AS actions
               FROM agents_discovered
              WHERE dna_b64 = ?1
-             GROUP BY agent_b64))                                                               AS total_actions,
+             GROUP BY agent_b64
+          ),
+          mig AS (
+            SELECT COALESCE(SUM(actions), 0) AS total_actions,
+                   COALESCE(SUM(closed), 0)  AS agents_closed,
+                   COALESCE(SUM(opened), 0)  AS agents_opened
+              FROM per_agent
+          )
+     SELECT
+       (SELECT COUNT(DISTINCT agent_b64) FROM agents_discovered WHERE dna_b64 = ?1)             AS agents,
+       mig.total_actions                                                                        AS total_actions,
+       mig.agents_closed                                                                        AS agents_closed,
+       mig.agents_opened                                                                        AS agents_opened,
        (SELECT COUNT(DISTINCT op_hash_b64) FROM warrants WHERE dna_b64 = ?1)                    AS warrants,
        (SELECT COUNT(DISTINCT observer_id) FROM dnas_seen WHERE dna_b64 = ?1)                   AS observers,
        (SELECT MAX(last_seen_iso) FROM dnas_seen WHERE dna_b64 = ?1)                            AS last_activity_iso,
        (SELECT MAX(COALESCE(dt.name, ds.dna_tag))
           FROM dnas_seen ds
      LEFT JOIN dna_tags dt ON dt.dna_b64 = ds.dna_b64
-         WHERE ds.dna_b64 = ?1)                                                                 AS dna_tag`,
+         WHERE ds.dna_b64 = ?1)                                                                 AS dna_tag
+       FROM mig`,
   )
     .bind(dna)
     .first<{
       agents: number;
       total_actions: number;
+      agents_closed: number;
+      agents_opened: number;
       warrants: number;
       observers: number;
       last_activity_iso: string | null;
@@ -97,10 +119,12 @@ routes.get("/dnas/:dna/agents", async (c) => {
               a.last_seen_iso,
               a.action_count,
               a.warrants_issued,
-              a.warrants_against
+              a.warrants_against,
+              a.chain_closed,
+              a.opening_summary_present
          FROM agents_discovered a
         WHERE a.dna_b64 = ?1
-        ORDER BY a.action_count DESC
+        ORDER BY a.chain_closed DESC, a.opening_summary_present DESC, a.action_count DESC
         LIMIT ?2`,
     )
       .bind(dna, limit)
@@ -115,6 +139,8 @@ routes.get("/dnas/:dna/agents", async (c) => {
             COUNT(DISTINCT a.observer_id)                                AS observer_count,
             MIN(a.first_seen_iso)                                        AS first_seen_iso,
             MAX(a.last_seen_iso)                                         AS last_seen_iso,
+            MAX(a.chain_closed)                                          AS chain_closed,
+            MAX(a.opening_summary_present)                               AS opening_summary_present,
             (SELECT COUNT(DISTINCT op_hash_b64) FROM warrants w
                WHERE w.dna_b64 = a.dna_b64 AND w.author_b64 = a.agent_b64) AS warrants_issued,
             (SELECT COUNT(DISTINCT op_hash_b64) FROM warrants w
@@ -123,7 +149,7 @@ routes.get("/dnas/:dna/agents", async (c) => {
   LEFT JOIN agent_tags at ON at.observer_id = a.observer_id AND at.pubkey_b64 = a.agent_b64
       WHERE a.dna_b64 = ?1
       GROUP BY a.agent_b64
-      ORDER BY action_count DESC
+      ORDER BY chain_closed DESC, opening_summary_present DESC, action_count DESC
       LIMIT ?2`,
   )
     .bind(dna, limit)

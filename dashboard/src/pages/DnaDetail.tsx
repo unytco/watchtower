@@ -42,7 +42,7 @@ export function DnaDetail() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-2">
           <Tile label="Total actions" value={summary?.total_actions ?? 0} />
           <Tile label="Agents" value={summary?.agents ?? 0} />
           <Tile
@@ -51,6 +51,8 @@ export function DnaDetail() {
             tone={summary && summary.warrants > 0 ? "danger" : undefined}
           />
           <Tile label="Observers" value={summary?.observers ?? 0} />
+          <Tile label="Agents closed" value={summary?.agents_closed ?? 0} />
+          <Tile label="Agents opened" value={summary?.agents_opened ?? 0} />
         </div>
       </header>
 
@@ -87,10 +89,15 @@ function Tile({
   value: number;
   tone?: "danger";
 }) {
+  // Stable, label-derived test id on the value so a test can target one tile
+  // (e.g. the migration counters) without matching another tile that happens
+  // to share its number.
+  const testId = `tile-${label.toLowerCase().replace(/\s+/g, "-")}`;
   return (
     <div className="bg-surface border border-border rounded p-4">
       <div className="text-xs text-muted uppercase tracking-wider">{label}</div>
       <div
+        data-testid={testId}
         className={`text-3xl font-semibold mt-1 mono ${tone === "danger" ? "text-danger" : ""}`}
       >
         {value.toLocaleString()}

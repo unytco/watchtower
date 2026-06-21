@@ -68,6 +68,11 @@ export interface AgentSummary {
   action_count: number;
   warrants_issued: number;
   warrants_against: number;
+  // Migration visibility, derived by the observer from chain-terminating
+  // actions already in the DHT. Optional so older observer payloads still
+  // ingest; absent is treated as false.
+  chain_closed?: boolean;
+  opening_summary_present?: boolean;
 }
 
 export interface WarrantSummary {

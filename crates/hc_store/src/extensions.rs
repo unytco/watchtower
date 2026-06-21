@@ -241,6 +241,77 @@ pub fn integration_lag(
     })
 }
 
+/// Per-author migration status, derived from the chain-terminating system
+/// actions already present in the DHT DB.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationStatusRow {
+    pub author: AgentPubKey,
+    /// The agent committed a `CloseChain` action — its chain is closed. On the
+    /// old (predecessor) network this is the tail of the migration close:
+    /// `close_agent_chain` commits the `ClosingStateSummary` and then issues
+    /// `close_chain`. The alliance DNA has no non-migration close path.
+    pub chain_closed: bool,
+    /// The agent committed an `OpenChain` action — it has opened onto this DNA.
+    /// On the new (successor) network this is the tail of `migration_init`,
+    /// which commits the `OpeningStateSummary` and then issues `open_chain`.
+    pub opening_summary_present: bool,
+}
+
+/// Per-author migration flags, read from the **already-open DHT connection**.
+///
+/// One aggregating query over the `Action`/`DhtOp` tables the collector has
+/// already opened for this DNA — no new cell is fetched or scanned. The
+/// `Action.type` column stores Holochain's `ActionType` via its `Display`
+/// impl, so a `CloseChain` action is the literal string `"CloseChain"` and an
+/// `OpenChain` action is `"OpenChain"` (`holochain_types::sql` → `via_display`).
+/// Authors with neither action never appear in the result.
+///
+/// Like [`count_actions_by_author`](crate::retrieve::count_actions_by_author),
+/// this counts only **integrated, validation-passed** ops: the `Action` is
+/// joined to its `DhtOp` on `DhtOp.action_hash = Action.hash` and restricted to
+/// `when_integrated IS NOT NULL` and `validation_status = 0` (`Valid`; the
+/// `ValidationStatus` `ToSql` maps `Valid → 0`, `Rejected → 1`, `Abandoned →
+/// 2`). A migration counter must reflect *validated* migrations, so a
+/// `CloseChain`/`OpenChain` whose op is still un-integrated or was
+/// rejected/abandoned is not reported as closed/opened — matching how the
+/// observer's other per-author metric treats the chain.
+pub fn migration_status_by_author(
+    dht: &mut SqliteConnection,
+) -> HcOpsResult<Vec<MigrationStatusRow>> {
+    #[derive(QueryableByName, Debug)]
+    struct Row {
+        #[diesel(sql_type = diesel::sql_types::Binary)]
+        author: Vec<u8>,
+        #[diesel(sql_type = BigInt)]
+        closed: i64,
+        #[diesel(sql_type = BigInt)]
+        opened: i64,
+    }
+
+    let rows: Vec<Row> = sql_query(
+        r#"SELECT a.author                       AS author,
+                  MAX(a.type = 'CloseChain')      AS closed,
+                  MAX(a.type = 'OpenChain')       AS opened
+             FROM Action a
+             JOIN DhtOp o ON o.action_hash = a.hash
+            WHERE a.type IN ('CloseChain', 'OpenChain')
+              AND o.when_integrated IS NOT NULL
+              AND o.validation_status = 0
+            GROUP BY a.author"#,
+    )
+    .get_results(dht)?;
+
+    rows.into_iter()
+        .map(|r| {
+            Ok(MigrationStatusRow {
+                author: AgentPubKey::try_from_raw_39(r.author)?,
+                chain_closed: r.closed != 0,
+                opening_summary_present: r.opened != 0,
+            })
+        })
+        .collect()
+}
+
 /// Cap-grant tag + function count surfaced from the Entry table (authored DB).
 #[derive(Debug, Clone)]
 pub struct CapGrantRow {

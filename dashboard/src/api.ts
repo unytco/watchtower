@@ -38,6 +38,13 @@ export interface DnaSummary {
   dna_tag: string | null;
   agents: number;
   total_actions: number;
+  // Migration counters: agents whose chain has closed (old network) / that
+  // have opened onto this DNA (new network). Zero outside a migration window.
+  // Optional so a dashboard built against a not-yet-migrated worker is
+  // type-honest (the worker `AgentSummary` flags are likewise optional, and
+  // DnaDetail guards with `?? 0`).
+  agents_closed?: number;
+  agents_opened?: number;
   warrants: number;
   observers: number;
   last_activity_iso: string | null;
@@ -52,6 +59,10 @@ export interface DnaAgent {
   last_seen_iso: string;
   warrants_issued: number;
   warrants_against: number;
+  // Migration flags, stored as 0/1 by D1. MAX across observers in canonical
+  // mode; the raw row's value in per_observer mode.
+  chain_closed: number;
+  opening_summary_present: number;
   // Populated only in per_observer mode.
   observer_id?: string;
   dna_b64?: string;
@@ -168,7 +179,9 @@ export function useDnaObservers(dna: string | undefined) {
   );
 }
 
-export function useWarrants(opts: { observerId?: string; dna?: string; limit?: number } = {}) {
+export function useWarrants(
+  opts: { observerId?: string; dna?: string; limit?: number } = {},
+) {
   const params = new URLSearchParams();
   if (opts.observerId) params.set("observer_id", opts.observerId);
   if (opts.dna) params.set("dna", opts.dna);
@@ -177,7 +190,9 @@ export function useWarrants(opts: { observerId?: string; dna?: string; limit?: n
   return useSWR<{ warrants: Warrant[] }>(`/api/warrants${qs}`, fetcher);
 }
 
-export function useMetrics(opts: { observerId?: string; dna?: string; hours?: number } = {}) {
+export function useMetrics(
+  opts: { observerId?: string; dna?: string; hours?: number } = {},
+) {
   const params = new URLSearchParams({ hours: String(opts.hours ?? 24) });
   if (opts.observerId) params.set("observer_id", opts.observerId);
   if (opts.dna) params.set("dna", opts.dna);
@@ -251,11 +266,9 @@ export function useBridgeService(dna: string | undefined) {
     services: BridgeService[];
     backlog: BridgeBacklogRow[];
     throughput: BridgeThroughputRow[];
-  }>(
-    dna ? `/api/dnas/${encodeURIComponent(dna)}/bridge` : null,
-    fetcher,
-    { refreshInterval: 30_000 },
-  );
+  }>(dna ? `/api/dnas/${encodeURIComponent(dna)}/bridge` : null, fetcher, {
+    refreshInterval: 30_000,
+  });
 }
 
 export function useSearch(q: string) {

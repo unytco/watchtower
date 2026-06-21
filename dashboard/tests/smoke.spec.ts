@@ -54,6 +54,8 @@ test("home renders DNA list and fleet strip, click-through opens DNA detail", as
           dna_tag: "unyt",
           agents: 3,
           total_actions: 1234,
+          agents_closed: 2,
+          agents_opened: 1,
           warrants: 0,
           observers: 1,
           last_activity_iso: new Date().toISOString(),
@@ -75,6 +77,8 @@ test("home renders DNA list and fleet strip, click-through opens DNA detail", as
               last_seen_iso: new Date().toISOString(),
               warrants_issued: 0,
               warrants_against: 0,
+              chain_closed: 1,
+              opening_summary_present: 0,
             },
           ],
         },
@@ -90,7 +94,9 @@ test("home renders DNA list and fleet strip, click-through opens DNA detail", as
 
   await page.goto("/");
 
-  await expect(page.getByText("watchtower")).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "watchtower", exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "DNAs", exact: true }),
   ).toBeVisible();
@@ -102,8 +108,57 @@ test("home renders DNA list and fleet strip, click-through opens DNA detail", as
 
   await page.getByText("unyt").first().click();
 
-  await expect(page).toHaveURL(new RegExp(`/dnas/${encodeURIComponent(DNA_B64)}$`));
+  await expect(page).toHaveURL(
+    new RegExp(`/dnas/${encodeURIComponent(DNA_B64)}$`),
+  );
   await expect(page.getByText("Total actions")).toBeVisible();
-  await page.getByRole("link", { name: "Agents" }).click();
+  // Migration counters render on the DNA's existing detail view.
+  await expect(page.getByText("Agents closed")).toBeVisible();
+  await expect(page.getByText("Agents opened")).toBeVisible();
+
+  await page.getByRole("link", { name: "Agents", exact: true }).click();
   await expect(page.getByText("agent-A")).toBeVisible();
+  // The per-agent migration flags render as their own columns.
+  await expect(
+    page.getByRole("columnheader", { name: "Closed" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: "Opened" }),
+  ).toBeVisible();
+});
+
+test("DNA with no migrations renders the counters at zero", async ({
+  page,
+}) => {
+  // Outside a migration window the summary reports zero closed/opened; the
+  // tiles must still render (as 0), not blank or error.
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === `/api/dnas/${DNA_B64}/summary`) {
+      return route.fulfill({
+        json: {
+          dna_b64: DNA_B64,
+          dna_tag: "unyt",
+          agents: 0,
+          total_actions: 0,
+          agents_closed: 0,
+          agents_opened: 0,
+          warrants: 0,
+          observers: 1,
+          last_activity_iso: new Date().toISOString(),
+        },
+      });
+    }
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto(`/dnas/${encodeURIComponent(DNA_B64)}`);
+
+  // Scope to the migration tiles by their label-derived test id, so the
+  // assertion can't be satisfied by another tile (e.g. Total actions) that
+  // also reads 0 — a blank / NaN regression in these tiles would now fail.
+  await expect(page.getByText("Agents closed")).toBeVisible();
+  await expect(page.getByText("Agents opened")).toBeVisible();
+  await expect(page.getByTestId("tile-agents-closed")).toHaveText("0");
+  await expect(page.getByTestId("tile-agents-opened")).toHaveText("0");
 });
