@@ -56,6 +56,13 @@ CREATE TABLE IF NOT EXISTS agents_discovered (
   warrants_issued       INTEGER NOT NULL,
   warrants_against      INTEGER NOT NULL,
   updated_at            TEXT NOT NULL,
+  -- Migration visibility (added in 0004_migration_counters.sql). Derived from
+  -- chain-terminating system actions the observer already sees: chain_closed =
+  -- the agent issued CloseChain (old network); opening_summary_present = it
+  -- issued OpenChain (new network). The (observer, dna, agent) key keeps the
+  -- table bounded by fleet size, so the counters never grow with window length.
+  chain_closed              INTEGER NOT NULL DEFAULT 0,
+  opening_summary_present   INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (observer_id, dna_b64, agent_b64)
 );
 CREATE INDEX IF NOT EXISTS idx_agents_updated ON agents_discovered (updated_at);

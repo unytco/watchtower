@@ -136,14 +136,21 @@ function pushDna(
       env.DB.prepare(
         `INSERT INTO agents_discovered (observer_id, dna_b64, agent_b64, agent_tag,
                                         first_seen_iso, last_seen_iso,
-                                        action_count, warrants_issued, warrants_against, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        action_count, warrants_issued, warrants_against,
+                                        chain_closed, opening_summary_present, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(observer_id, dna_b64, agent_b64) DO UPDATE SET
            agent_tag = excluded.agent_tag,
            last_seen_iso = excluded.last_seen_iso,
            action_count = excluded.action_count,
            warrants_issued = excluded.warrants_issued,
            warrants_against = excluded.warrants_against,
+           -- Close/Open are monotonic facts: once an observer has seen an
+           -- agent close or open, a later snapshot that read the DHT before
+           -- the op re-appeared (a transient read miss reports false) must not
+           -- clobber the stored 1 back to 0. MAX keeps the flag latched.
+           chain_closed = MAX(chain_closed, excluded.chain_closed),
+           opening_summary_present = MAX(opening_summary_present, excluded.opening_summary_present),
            updated_at = excluded.updated_at`,
       ).bind(
         observer_id,
@@ -155,6 +162,8 @@ function pushDna(
         a.action_count,
         a.warrants_issued,
         a.warrants_against,
+        a.chain_closed ? 1 : 0,
+        a.opening_summary_present ? 1 : 0,
         collected_at,
       ),
     );

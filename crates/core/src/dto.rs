@@ -93,6 +93,16 @@ pub struct AgentSummary {
     pub action_count: u32,
     pub warrants_issued: u32,
     pub warrants_against: u32,
+    /// Migration visibility, derived from chain-terminating system actions
+    /// already in this DNA's DHT (no extra scan). `chain_closed`: the agent
+    /// issued `CloseChain` — on the old network, the tail of its migration
+    /// close. `opening_summary_present`: the agent issued `OpenChain` — on the
+    /// new network, the tail of `migration_init`. Default false so older
+    /// observer payloads decode unchanged.
+    #[serde(default)]
+    pub chain_closed: bool,
+    #[serde(default)]
+    pub opening_summary_present: bool,
 }
 
 /// A single warrant op. The heavy warrant body (the actions' full signed

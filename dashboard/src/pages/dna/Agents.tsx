@@ -16,7 +16,8 @@ export function DnaAgents() {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div className="text-xs text-muted">
-          {rows.length.toLocaleString()} {perObserver ? "(observer, agent) pair" : "agent"}
+          {rows.length.toLocaleString()}{" "}
+          {perObserver ? "(observer, agent) pair" : "agent"}
           {rows.length === 1 ? "" : "s"} in scope
         </div>
         <label className="flex items-center gap-2 text-xs text-muted">
@@ -37,9 +38,13 @@ export function DnaAgents() {
               <th className="text-left px-3 py-2">Agent</th>
               {perObserver && <th className="text-left px-3 py-2">Observer</th>}
               <th className="text-right px-3 py-2">Actions</th>
-              {!perObserver && <th className="text-right px-3 py-2">Observers</th>}
+              {!perObserver && (
+                <th className="text-right px-3 py-2">Observers</th>
+              )}
               <th className="text-right px-3 py-2">Warrants issued</th>
               <th className="text-right px-3 py-2">Warrants against</th>
+              <th className="text-center px-3 py-2">Closed</th>
+              <th className="text-center px-3 py-2">Opened</th>
               <th className="text-left px-3 py-2">Last seen</th>
             </tr>
           </thead>
@@ -84,16 +89,19 @@ export function DnaAgents() {
                       {r.warrants_against}
                     </span>
                   </td>
+                  <td className="px-3 py-2 text-center">
+                    <MigrationMark on={r.chain_closed} />
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <MigrationMark on={r.opening_summary_present} />
+                  </td>
                   <td className="px-3 py-2">{relTime(r.last_seen_iso)}</td>
                 </tr>
               );
             })}
             {rows.length === 0 && (
               <tr>
-                <td
-                  className="px-3 py-6 text-center text-muted"
-                  colSpan={perObserver ? 6 : 6}
-                >
+                <td className="px-3 py-6 text-center text-muted" colSpan={8}>
                   No agents discovered for this DNA yet.
                 </td>
               </tr>
@@ -102,5 +110,19 @@ export function DnaAgents() {
         </table>
       </div>
     </div>
+  );
+}
+
+// Migration flags arrive as 0/1 from D1. A set flag shows a check; an unset one
+// a muted dash, so a non-migrating fleet reads as a quiet column of dashes.
+function MigrationMark({ on }: { on: number }) {
+  return on ? (
+    <span className="text-accent" title="yes">
+      ✓
+    </span>
+  ) : (
+    <span className="text-muted" title="no">
+      –
+    </span>
   );
 }

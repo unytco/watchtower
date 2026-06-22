@@ -170,14 +170,29 @@ fn collect_dna_snapshot(cfg: &CollectorConfig, dna_hash: &DnaHash) -> Result<Dna
         })
         .collect();
 
-    let agents: Vec<AgentSummary> = agents_raw
+    // Per-agent migration flags, read from the SAME `dht` connection already
+    // open for this DNA — no extra cell is fetched or scanned. Keyed by the
+    // agent's raw-39 bytes. A read failure degrades to "no migration signal"
+    // rather than aborting the snapshot.
+    let migration_map: HashMap<Vec<u8>, extensions::MigrationStatusRow> =
+        extensions::migration_status_by_author(&mut dht)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "migration_status_by_author failed");
+                Vec::new()
+            })
+            .into_iter()
+            .map(|r| (r.author.get_raw_39().to_vec(), r))
+            .collect();
+
+    let mut agents: Vec<AgentSummary> = agents_raw
         .into_iter()
         .map(|a| {
-            let b64 = tag::b64url(&a.get_raw_39());
-            let action_count = count_map
-                .get(&a.get_raw_39().to_vec())
-                .copied()
-                .unwrap_or(0) as u32;
+            // Bind the raw-39 key once: it's the b64 source and both HashMap keys.
+            let raw = a.get_raw_39().to_vec();
+            let b64 = tag::b64url(&raw);
+            let action_count = count_map.get(&raw).copied().unwrap_or(0) as u32;
+            let (chain_closed, opening_summary_present) =
+                migration_flags(migration_map.get(&raw));
             let now = Utc::now().to_rfc3339();
             AgentSummary {
                 agent_b64: b64.clone(),
@@ -187,9 +202,20 @@ fn collect_dna_snapshot(cfg: &CollectorConfig, dna_hash: &DnaHash) -> Result<Dna
                 action_count,
                 warrants_issued: issued.get(&b64).copied().unwrap_or(0),
                 warrants_against: against.get(&b64).copied().unwrap_or(0),
+                chain_closed,
+                opening_summary_present,
             }
         })
         .collect();
+
+    // A closer/opener is normally also discovered (it joined this DNA with an
+    // `AgentValidationPkg`, so `list_discovered_agents` names it). But discovery
+    // and the migration read can disagree at the edges — a cache eviction, or a
+    // close whose op integrated before its `AgentValidationPkg` op did — and a
+    // migration counter must never under-count. Fold any migration author not
+    // already represented into the reported set as a minimal flagged row, still
+    // from the same `dht` connection (no new scan).
+    append_migration_only_agents(&mut agents, &migration_map, &cfg.agent_tags);
 
     let chain_summaries: Vec<ChainSummary> = counts
         .iter()
@@ -374,6 +400,58 @@ fn load_key(cfg: &CollectorConfig) -> Result<Option<unyt_watchtower_hc_store::re
     crate::tier1_key(cfg)
 }
 
+/// Project a per-author migration row onto the two `AgentSummary` flags. An
+/// absent row (the agent issued neither `CloseChain` nor `OpenChain`) reads as
+/// `(false, false)`.
+fn migration_flags(row: Option<&extensions::MigrationStatusRow>) -> (bool, bool) {
+    match row {
+        Some(m) => (m.chain_closed, m.opening_summary_present),
+        None => (false, false),
+    }
+}
+
+/// Append a minimal flagged [`AgentSummary`] for any migration author not
+/// already in `agents`, so a closer/opener that discovery missed is still
+/// counted. The synthesized row carries only the migration flags (no action
+/// count, no warrants — discovery never saw it); `first/last_seen` is "now",
+/// the same stamp the discovered rows use this cycle. Keyed by the b64 agent id
+/// the rest of the snapshot uses.
+fn append_migration_only_agents(
+    agents: &mut Vec<AgentSummary>,
+    migration_map: &HashMap<Vec<u8>, extensions::MigrationStatusRow>,
+    agent_tags: &HashMap<String, String>,
+) {
+    let seen: std::collections::HashSet<&str> =
+        agents.iter().map(|a| a.agent_b64.as_str()).collect();
+
+    let mut extra: Vec<AgentSummary> = migration_map
+        .values()
+        .filter_map(|row| {
+            let b64 = tag::b64url(&row.author.get_raw_39());
+            if seen.contains(b64.as_str()) {
+                return None;
+            }
+            let now = Utc::now().to_rfc3339();
+            Some(AgentSummary {
+                agent_b64: b64.clone(),
+                agent_tag: agent_tags.get(&b64).cloned(),
+                first_seen_iso: now.clone(),
+                last_seen_iso: now,
+                action_count: 0,
+                warrants_issued: 0,
+                warrants_against: 0,
+                chain_closed: row.chain_closed,
+                opening_summary_present: row.opening_summary_present,
+            })
+        })
+        .collect();
+
+    // `migration_map` iterates a HashMap (unordered); sort the appended rows so
+    // the snapshot is deterministic across cycles.
+    extra.sort_by(|a, b| a.agent_b64.cmp(&b.agent_b64));
+    agents.append(&mut extra);
+}
+
 fn ts_to_iso(micros: i64) -> String {
     let secs = micros / 1_000_000;
     let nanos = ((micros % 1_000_000) as u32) * 1000;
@@ -530,5 +608,87 @@ mod tests {
             validation_status_label(ValidationStatus::Abandoned),
             "Abandoned"
         );
+    }
+
+    #[test]
+    fn migration_flags_project_onto_agent_summary() {
+        use unyt_watchtower_hc_store::extensions::MigrationStatusRow;
+
+        // Absent row → no migration signal.
+        assert_eq!(migration_flags(None), (false, false));
+
+        let closed = MigrationStatusRow {
+            author: agent(0x01),
+            chain_closed: true,
+            opening_summary_present: false,
+        };
+        assert_eq!(migration_flags(Some(&closed)), (true, false));
+
+        let opened = MigrationStatusRow {
+            author: agent(0x02),
+            chain_closed: false,
+            opening_summary_present: true,
+        };
+        assert_eq!(migration_flags(Some(&opened)), (false, true));
+    }
+
+    #[test]
+    fn append_migration_only_agents_folds_in_undiscovered_closers() {
+        use unyt_watchtower_hc_store::extensions::MigrationStatusRow;
+
+        let discovered = agent(0xaa);
+        let undiscovered_closer = agent(0xbb);
+        let discovered_b64 = tag::b64url(&discovered.get_raw_39());
+        let closer_b64 = tag::b64url(&undiscovered_closer.get_raw_39());
+
+        // One agent was discovered (it has an action count); two agents carry a
+        // migration flag — the discovered one and an undiscovered closer.
+        let mut agents = vec![AgentSummary {
+            agent_b64: discovered_b64.clone(),
+            agent_tag: None,
+            first_seen_iso: "t".into(),
+            last_seen_iso: "t".into(),
+            action_count: 7,
+            warrants_issued: 0,
+            warrants_against: 0,
+            chain_closed: true,
+            opening_summary_present: false,
+        }];
+
+        let mut migration_map = HashMap::new();
+        migration_map.insert(
+            discovered.get_raw_39().to_vec(),
+            MigrationStatusRow {
+                author: discovered.clone(),
+                chain_closed: true,
+                opening_summary_present: false,
+            },
+        );
+        migration_map.insert(
+            undiscovered_closer.get_raw_39().to_vec(),
+            MigrationStatusRow {
+                author: undiscovered_closer.clone(),
+                chain_closed: true,
+                opening_summary_present: false,
+            },
+        );
+
+        append_migration_only_agents(&mut agents, &migration_map, &HashMap::new());
+
+        // The discovered agent is not duplicated; the undiscovered closer is
+        // folded in as a flagged, action-count-zero row.
+        assert_eq!(agents.len(), 2);
+        let discovered_row = agents
+            .iter()
+            .find(|a| a.agent_b64 == discovered_b64)
+            .expect("discovered agent kept");
+        assert_eq!(discovered_row.action_count, 7);
+
+        let folded = agents
+            .iter()
+            .find(|a| a.agent_b64 == closer_b64)
+            .expect("undiscovered closer folded in");
+        assert_eq!(folded.action_count, 0);
+        assert!(folded.chain_closed && !folded.opening_summary_present);
     }
 }
