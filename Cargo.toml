@@ -37,13 +37,13 @@ humantime = "2"
 rmpv = "1"
 
 # Holochain deps (bumped together when holochain releases)
-holochain_client = { version = "0.8.1", default-features = false }
-holochain_conductor_api = "0.6.1"
-holochain_types = "0.6.1"
-holochain_zome_types = "0.6.1"
-holochain_sqlite = "0.6.1"
+holochain_client = { version = "0.8.2-rc.0", default-features = false }
+holochain_conductor_api = "0.6.2-rc.0"
+holochain_types = "0.6.2-rc.0"
+holochain_zome_types = "0.6.2-rc.0"
+holochain_sqlite = "0.6.2-rc.0"
 holochain_serialized_bytes = "0.0.57"
-holo_hash = { version = "0.6.1", features = ["kitsune2"] }
+holo_hash = { version = "0.6.2-rc.0", features = ["kitsune2"] }
 kitsune2_api = "0.4.1"
 kitsune2_core = "0.4.1"
 kitsune2_dht = "0.4.1"
