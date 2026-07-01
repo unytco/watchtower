@@ -8,7 +8,7 @@
 daemon** (Rust) that watches a local Holochain conductor and emits
 structured metrics, a **CLI** (Rust) for one-shot inspection, a
 **Cloudflare Worker** (TS) that ingests + persists to D1, and a
-**dashboard** (SvelteKit / Vite + Cloudflare Pages) that reads the
+**dashboard** (React / Vite + Cloudflare Pages) that reads the
 worker's API. Observer deploys via `automation/`; worker + dashboard
 deploy via Wrangler.
 
@@ -29,7 +29,7 @@ mechanics.
   target of [`hc-chain-doc`](../hc-chain-doc/)).
 - Cloudflare Worker at [`worker/`](worker/) — `wrangler.jsonc`,
   TypeScript, D1-backed.
-- Dashboard at [`dashboard/`](dashboard/) — SvelteKit + Vite, deploys
+- Dashboard at [`dashboard/`](dashboard/) — React + Vite, deploys
   to Cloudflare Pages via Wrangler.
 - **Requires `nix develop -c …`** — see
   [`flake.nix`](flake.nix). The workshop's
@@ -62,8 +62,8 @@ nix develop -c cargo fmt --check
 ( cd worker && npx prettier --check "**/*.{ts,tsx,json}" )
 
 # Dashboard (no format script today; use prettier directly)
-( cd dashboard && npx prettier --write "src/**/*.{ts,svelte,js,css,json}" )
-( cd dashboard && npx prettier --check "src/**/*.{ts,svelte,js,css,json}" )
+( cd dashboard && npx prettier --write "src/**/*.{ts,tsx,js,css,json}" )
+( cd dashboard && npx prettier --check "src/**/*.{ts,tsx,js,css,json}" )
 ```
 
 If a `format` / `format:check` script is later wired into either
