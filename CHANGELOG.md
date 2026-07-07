@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- docs + example config follow the observer's move to the hash-explorer node (`make hash-explorer-watchtower` in automation replaces the always-online target; example `observer_id` is now `hash-explorer-1`). Deploy mechanics unchanged.
 - D1 migration `0004_migration_counters.sql`: `agents_discovered` gains `chain_closed` and `opening_summary_present` (INTEGER, default 0); the row stays keyed on `(observer, dna, agent)`, so the table remains bounded by fleet size. Apply on redeploy.
 - dashboard API contract: `GET /api/dnas/:dna/summary` gains `agents_closed` / `agents_opened`; `GET /api/dnas/:dna/agents` rows gain `chain_closed` / `opening_summary_present`.
 - upgrade Holochain ecosystem to 0.6.2-rc.0 across all crates; kitsune2 stays at 0.4.1

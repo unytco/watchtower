@@ -7,7 +7,7 @@ subsequent everyday redeploy flow.
 Per-server observer install (the part that actually collects data from a
 Holochain node) lives in the `automation/` repo; see
 `automation/scripts/setup-watchtower-observer.sh` and the per-server
-Makefile targets such as `heart-always-online-2-watchtower`.
+Makefile targets such as `hash-explorer-watchtower`.
 
 ## Prerequisites
 
@@ -111,7 +111,7 @@ its secret or POST snapshots). Then from the `automation/` repo:
 
 ```bash
 cd automation
-make heart-always-online-2-watchtower   # or any other <server>-watchtower target
+make hash-explorer-watchtower           # or any other <server>-watchtower target
 ```
 
 This runs `automation/scripts/setup-watchtower-observer.sh`, which:
