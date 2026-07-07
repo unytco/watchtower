@@ -1,4 +1,4 @@
-observer_id = "heart-always-online-1"
+observer_id = "hash-explorer-1"
 
 [ingest]
 url = "https://watchtower.unyt.dev/ingest"
