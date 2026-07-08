@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "unyt-watchtower",
-  "account_id": "42bb42af90168b2108ab750004e4a0dd",
+  "account_id": "3ad68e5ee4d2368167fa7a62d667c158",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-20",
   "compatibility_flags": ["nodejs_compat"],
@@ -18,7 +18,7 @@
     {
       "binding": "DB",
       "database_name": "watchtower",
-      "database_id": "5112868b-60db-4b58-b78b-32075fbfb879",
+      "database_id": "4d9bd50a-6b89-43f3-b402-c62b2ef51e2c",
       "migrations_dir": "./migrations"
     }
   ],
