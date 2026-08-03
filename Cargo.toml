@@ -37,16 +37,16 @@ humantime = "2"
 rmpv = "1"
 
 # Holochain deps (bumped together when holochain releases)
-holochain_client = { version = "0.8.2-rc.0", default-features = false }
-holochain_conductor_api = "0.6.2-rc.0"
-holochain_types = "0.6.2-rc.0"
-holochain_zome_types = "0.6.2-rc.0"
-holochain_sqlite = "0.6.2-rc.0"
+holochain_client = { version = "0.9.0", default-features = false }
+holochain_conductor_api = "0.7.0"
+holochain_types = "0.7.0"
+holochain_zome_types = "0.7.0"
+holochain_sqlite = "0.7.0"
 holochain_serialized_bytes = "0.0.57"
-holo_hash = { version = "0.6.2-rc.0", features = ["kitsune2"] }
-kitsune2_api = "0.4.1"
-kitsune2_core = "0.4.1"
-kitsune2_dht = "0.4.1"
+holo_hash = { version = "0.7.0", features = ["kitsune2"] }
+kitsune2_api = "0.5.0"
+kitsune2_core = "0.5.0"
+kitsune2_dht = "0.5.0"
 
 diesel = { version = "2.2", features = ["sqlite"] }
 libsqlite3-sys = { version = "0.35.0", features = [
@@ -62,6 +62,12 @@ unyt_watchtower_collector = { path = "crates/collector" }
 
 # Shared Holochain client helpers (ham = Holochain AppWebsocket/Admin helpers).
 ham = { git = "https://github.com/unytco/ham.git", branch = "main" }
+
+# Local-only override so verification picks up the in-tree ham changes.
+# Drop this once the 0.7 ham release is pushed to
+# https://github.com/unytco/ham.git on main.
+[patch."https://github.com/unytco/ham.git"]
+ham = { path = "../ham" }
 
 [profile.release]
 lto = "thin"
