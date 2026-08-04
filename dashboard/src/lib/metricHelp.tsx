@@ -40,9 +40,9 @@ export const metricHelp: Record<MetricField, ReactNode> = {
       </div>
       <div className="text-muted">
         Computed from{" "}
-        <span className="mono">when_integrated − authored_timestamp</span> over
-        the lag window. Lower is better; healthy DHTs typically stay well under
-        a second.
+        <span className="mono">ChainOp.when_integrated − Action.timestamp</span>{" "}
+        over the lag window. Lower is better; healthy DHTs typically stay well
+        under a second.
       </div>
     </div>
   ),

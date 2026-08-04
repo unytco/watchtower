@@ -14,13 +14,16 @@ deploy via Wrangler.
 
 ## License
 
-`GPL-3.0-or-later` for the Rust workspace. This is forced by
-the GPL-3.0 ancestry of [`crates/hc_store/`](crates/hc_store/)
-(vendored from `ThetaSinner/hc-ops`) and applies to every binary
-built from this workspace (observer daemon, CLI). New Rust code
-must be GPL-3.0-compatible. See [Syncing `hc_store` from upstream
-`hc-ops`](#syncing-hc_store-from-upstream-hc-ops) for the vendor
-mechanics.
+`GPL-3.0-or-later` for the Rust workspace, applying to every binary
+built from it (observer daemon, CLI). New Rust code must be
+GPL-3.0-compatible. The licence is inherited from
+`ThetaSinner/hc-ops`, which [`crates/hc_store/`](crates/hc_store/) was
+originally vendored from; the data layer has since been rewritten
+against `holochain_data` (see [The `hc_store` data
+layer](#the-hc_store-data-layer)), but
+[`readable.rs`](crates/hc_store/src/readable.rs) still carries
+hc-ops-derived code, so the obligation stands. **Whether the workspace
+could be relicensed now is an open question — do not assume it can.**
 
 ## Stack
 
@@ -89,74 +92,68 @@ nix develop -c cargo test                      # Rust workspace
 - **Dashboard**: `( cd dashboard && npx wrangler pages deploy dist )`
   after `npm run build`.
 
-## Syncing `hc_store` from upstream `hc-ops`
+## The `hc_store` data layer
 
-[`crates/hc_store/`](crates/hc_store/) is a **read-only vendor** of
-`ThetaSinner/hc-ops` (GPL-3.0). We have no write access to that
-upstream — fixes for any data-layer bug must land watchtower-side
-first, and may flow upstream later via a separately-coordinated PR
-if/when ThetaSinner is open to it. The three vendored files
-([`retrieve.rs`](crates/hc_store/src/retrieve.rs),
-[`ops.rs`](crates/hc_store/src/ops.rs),
-[`readable.rs`](crates/hc_store/src/readable.rs)) carry per-file
-`Vendored from ThetaSinner/hc-ops @ <sha>` markers; those markers are
-the source of truth for which upstream rev we're tracking. Watchtower-
-specific additions live in
-[`crates/hc_store/src/extensions.rs`](crates/hc_store/src/extensions.rs)
-and as `retrieve::list_authored_identities` — these are NOT in
-upstream, must be preserved on every sync, and should not bleed into
-the verbatim files.
+[`crates/hc_store/`](crates/hc_store/) reads a conductor's SQLite
+databases directly — that is how the observer collects without
+depending on admin-websocket coverage.
 
-### When to sync
+It was originally a vendored copy of `ThetaSinner/hc-ops`. Holochain
+0.7 replaced the raw-SQL `holochain_sqlite` crate with the sqlx-based
+`holochain_data` and reshaped the schema, so the vendored diesel layer
+was rewritten and the vendor relationship ended: upstream targets 0.6
+and there is nothing left to sync from. Only
+[`readable.rs`](crates/hc_store/src/readable.rs) still derives from
+hc-ops, and it no longer tracks it.
 
-Sync only when motivated by a concrete need:
+**Three facts must match the running conductor exactly, and all three
+are taken from [`holochain_data`](https://docs.rs/holochain_data), the
+crate the conductor writes with — never restated here:**
 
-- A bug in upstream data parsing (op decoding, action decoding,
-  SQLCipher key handling) that we hit and need a fix for.
-- A new API in upstream we want to expose through watchtower.
-- A Holochain dep bump on our side that requires upstream's adapter
-  changes to compile.
+1. **The schema.** Row structs come from
+   `holochain_data::models::dht`, and the tests build their fixtures
+   with `holochain_data::open_db`, so the schema under test is the
+   conductor's own embedded migration.
+2. **The file names.** `holochain_data::kind::{Dht, Conductor}`
+   produce `dht-<dna>.db` / `conductor.db`.
+3. **The SQLCipher key derivation.** `holochain_data::DbKey` unlocks
+   `<data_root>/databases/db.key` with the lair passphrase.
 
-Don't sync just to "stay current" — each sync is manual labor and
-risks regressing watchtower-specific extensions.
+Enum discriminants are likewise bound from the Holochain enums
+(`i64::from(ActionType::CloseChain)`), never written as literals.
 
-### How to sync (5 steps)
+### The rule this exists to enforce
 
-1. `cd ../hc-ops && git fetch && git checkout <rev>` where
-   `<rev>`'s `Cargo.toml` `holochain_*` / `kitsune2_*` /
-   `holochain_serialized_bytes` versions match watchtower's
-   [`[workspace.dependencies]`](Cargo.toml).
-2. For each of `retrieve.rs`, `retrieve/`, `ops.rs`, `readable.rs`:
-   diff `../hc-ops/src/<file>` against
-   `watchtower/crates/hc_store/src/<file>`; adopt upstream changes.
-   Preserve `list_authored_identities` (in `retrieve.rs`) and the
-   entire [`crates/hc_store/src/extensions.rs`](crates/hc_store/src/extensions.rs)
-   module — those are watchtower-specific additions, not in
-   upstream.
-3. Update the `Vendored from ThetaSinner/hc-ops @ <sha>` markers at
-   the top of those files to the new rev, and bump the `Last sync:`
-   line.
-4. `nix develop -c cargo check --workspace`, then
-   `nix develop -c cargo test --workspace`.
-5. Commit with message `hc_store: sync to hc-ops <short-sha>`.
+A schema mismatch here **compiles fine and fails silently** — queries
+return zero rows rather than erroring, so a broken observer looks like
+a quiet network. Chasing the compiler to green proves nothing.
 
-### When to migrate to a real Cargo dep
+- Every read is covered by
+  [`tests/real_schema.rs`](crates/hc_store/tests/real_schema.rs),
+  which writes through `holochain_data`'s own API and reads back
+  through `hc_store`. Never replace those fixtures with hand-written
+  `CREATE TABLE` — that is precisely how the 0.7 break went unnoticed.
+- On any Holochain bump, additionally point the reads at a **real
+  conductor** (a sweettest data root under
+  `/tmp/**/holochain-test-environments*/`, passphrase `passphrase`)
+  and cross-check the counts against `holochain_data`'s own queries
+  over the same file.
 
-Defer the migration from vendoring to
-`hc_ops = { git = "...", rev = "..." }` until **all three** of these
-are true:
+### Opening databases
 
-1. `hc-ops` upstream's `holochain_*` rc tags match watchtower's
-   `[workspace.dependencies]`.
-2. `hc-ops` drops the forked `serde_json`
-   (`git = "https://github.com/ThetaSinner/json.git"`) — or we
-   accept a `[patch.crates-io]` in watchtower's workspace pinning
-   everyone to one fork.
-3. `hc-ops` splits its `discover` default feature so a library
-   consumer can `default-features = false` cleanly without losing
-   the lib API.
+Reads open the file read-write at the SQLite level but set
+`PRAGMA query_only`, and leave `create_if_missing` off:
 
-Until then, vendor + sync is the path with the lowest blast radius.
+- read-write, because a `SQLITE_OPEN_READONLY` handle cannot replay a
+  `-wal` left by a stopped conductor, which would make a switched-off
+  node read as an empty one;
+- `query_only`, so SQLite itself rejects any write;
+- no create, so a wrong data root errors instead of conjuring an empty
+  database that reports zero of everything.
+
+`holochain_data::open_db` is deliberately **not** used for reading: it
+creates the file if missing and runs migrations, neither of which
+belongs anywhere near a production conductor.
 
 ## Repo-specific rules
 
@@ -170,14 +167,14 @@ Until then, vendor + sync is the path with the lowest blast radius.
   [`../hc-chain-doc/`](../hc-chain-doc/) first, then sync into
   [`crates/chain_doc/`](crates/chain_doc/). Never edit the vendor
   copy directly.
-- **Vendored `hc_store` is GPL-3.0 upstream.** Sourced from
-  `ThetaSinner/hc-ops` — we do not have write access. Sync
-  watchtower-side only, preserving `list_authored_identities` and the
-  entire [`extensions`](crates/hc_store/src/extensions.rs) module.
-  This vendor is what makes the whole Rust workspace
-  GPL-3.0-or-later; do not vendor additional GPL code without
-  explicit review. Full procedure in [Syncing `hc_store` from upstream
-  `hc-ops`](#syncing-hc_store-from-upstream-hc-ops).
+- **`hc_store` must never restate Holochain's storage contract.**
+  Schema, database file names, SQLCipher key derivation and enum
+  discriminants all come from `holochain_data`; a copy of any of them
+  breaks silently on the next Holochain bump. Full rationale in [The
+  `hc_store` data layer](#the-hc_store-data-layer).
+- **The workspace is GPL-3.0-or-later** through hc_store's hc-ops
+  ancestry; do not vendor additional GPL code without explicit
+  review.
 - **Worker stays small.** Heavy compute belongs in the observer
   daemon (which has more memory and CPU); the worker should be a
   thin ingest + read API.

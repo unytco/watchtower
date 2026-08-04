@@ -65,7 +65,7 @@ pub async fn coverage(cfg: &ObserverConfig, dna_b64: &str, n: i64) -> Result<()>
     Ok(())
 }
 
-pub fn export_chain(cfg: &ObserverConfig, dna_b64: &str, agent_b64: &str) -> Result<()> {
+pub async fn export_chain(cfg: &ObserverConfig, dna_b64: &str, agent_b64: &str) -> Result<()> {
     let c = cfg.to_collector();
     let exporter = Exporter::new(&c);
     let dna_bytes = tag::b64url_decode(dna_b64).map_err(|e| {
@@ -84,12 +84,13 @@ pub fn export_chain(cfg: &ObserverConfig, dna_b64: &str, agent_b64: &str) -> Res
     let agent = holo_hash::AgentPubKey::try_from_raw_39(agent_bytes)?;
     let path = exporter
         .agent_chain(&dna, &agent)
+        .await
         .map_err(|e| anyhow!("export_chain: {e}"))?;
     println!("wrote {}", path.display());
     Ok(())
 }
 
-pub fn export_pending_ops(cfg: &ObserverConfig, dna_b64: &str) -> Result<()> {
+pub async fn export_pending_ops(cfg: &ObserverConfig, dna_b64: &str) -> Result<()> {
     let c = cfg.to_collector();
     let exporter = Exporter::new(&c);
     let dna_bytes = tag::b64url_decode(dna_b64).map_err(|e| {
@@ -101,12 +102,13 @@ pub fn export_pending_ops(cfg: &ObserverConfig, dna_b64: &str) -> Result<()> {
     let dna = holo_hash::DnaHash::try_from_raw_39(dna_bytes)?;
     let path = exporter
         .pending_ops(&dna)
+        .await
         .map_err(|e| anyhow!("export_pending_ops: {e}"))?;
     println!("wrote {}", path.display());
     Ok(())
 }
 
-pub fn export_warrants(cfg: &ObserverConfig, dna_b64: Option<&str>) -> Result<()> {
+pub async fn export_warrants(cfg: &ObserverConfig, dna_b64: Option<&str>) -> Result<()> {
     let c = cfg.to_collector();
     let exporter = Exporter::new(&c);
     let dna = match dna_b64 {
@@ -123,6 +125,7 @@ pub fn export_warrants(cfg: &ObserverConfig, dna_b64: Option<&str>) -> Result<()
     };
     let path = exporter
         .warrants(dna.as_ref())
+        .await
         .map_err(|e| anyhow!("export_warrants: {e}"))?;
     println!("wrote {}", path.display());
     Ok(())
@@ -213,6 +216,7 @@ async fn collect_with(
         })?;
     collect_node_snapshot(c, &admin)
         .await
+        .map(|collected| collected.node)
         .map_err(|e| anyhow!("collect: {e}"))
 }
 

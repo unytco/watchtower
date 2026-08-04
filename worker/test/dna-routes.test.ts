@@ -112,7 +112,7 @@ async function seed() {
         kind: "InvalidChainOp",
         action_author_b64: AGENT_2,
         action_hash_b64: "action-1",
-        chain_op_type: "StoreEntry",
+        chain_op_type: "CreateEntry",
       }),
     ),
     DB.prepare(
@@ -215,7 +215,7 @@ describe("DNA-scoped routes", () => {
     expect(typeof enriched.proof_summary_json).toBe("string");
     const proof = JSON.parse(enriched.proof_summary_json as string);
     expect(proof.kind).toBe("InvalidChainOp");
-    expect(proof.chain_op_type).toBe("StoreEntry");
+    expect(proof.chain_op_type).toBe("CreateEntry");
 
     // OBS_Y simulates an older observer; the worker still returns the row
     // with the enrichment fields as NULL.

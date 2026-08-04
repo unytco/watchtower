@@ -107,10 +107,7 @@ enum TagCommand {
         name: String,
     },
     /// Remove a tag.
-    Unset {
-        kind: String,
-        b64: String,
-    },
+    Unset { kind: String, b64: String },
     /// List all tags.
     List,
 }
@@ -118,7 +115,9 @@ enum TagCommand {
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+        )
         .init();
 
     let cli = Cli::parse();
@@ -129,9 +128,9 @@ async fn main() -> Result<()> {
         Command::ListAgents { dna } => commands::list_agents(&cfg, &dna).await,
         Command::ListWarrants { dna } => commands::list_warrants(&cfg, dna.as_deref()).await,
         Command::Coverage { dna, n } => commands::coverage(&cfg, &dna, n).await,
-        Command::ExportChain { dna, agent } => commands::export_chain(&cfg, &dna, &agent),
-        Command::ExportPendingOps { dna } => commands::export_pending_ops(&cfg, &dna),
-        Command::ExportWarrants { dna } => commands::export_warrants(&cfg, dna.as_deref()),
+        Command::ExportChain { dna, agent } => commands::export_chain(&cfg, &dna, &agent).await,
+        Command::ExportPendingOps { dna } => commands::export_pending_ops(&cfg, &dna).await,
+        Command::ExportWarrants { dna } => commands::export_warrants(&cfg, dna.as_deref()).await,
         Command::ExportStateDump { input } => commands::export_state_dump(&cfg, &input),
         Command::RefreshNow => commands::refresh_now(&cli.config),
         Command::Tag { cmd } => commands::tag(&cli.config, cmd),

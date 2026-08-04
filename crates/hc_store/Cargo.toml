@@ -3,7 +3,7 @@ name = "unyt_watchtower_hc_store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Vendored hc-ops data layer (SQLite + admin-websocket) for unyt-watchtower"
+description = "Read-only data layer over Holochain conductor SQLite for unyt-watchtower"
 
 [dependencies]
 anyhow = { workspace = true }
@@ -14,11 +14,11 @@ base64 = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
-futures = "0.3"
 human_bytes = { version = "0.4", default-features = false }
 rmpv = { workspace = true }
 
-diesel = { workspace = true }
+holochain_data = { workspace = true }
+sqlx = { workspace = true }
 libsqlite3-sys = { workspace = true }
 sodoken = { workspace = true }
 
@@ -26,7 +26,7 @@ holochain_client = { workspace = true }
 holochain_conductor_api = { workspace = true }
 holochain_types = { workspace = true }
 holochain_zome_types = { workspace = true }
-holochain_sqlite = { workspace = true }
+holochain_integrity_types = { workspace = true }
 holochain_serialized_bytes = { workspace = true }
 holo_hash = { workspace = true }
 kitsune2_api = { workspace = true }
@@ -35,3 +35,4 @@ kitsune2_dht = { workspace = true }
 
 [dev-dependencies]
 rand = "0.9"
+tempfile = "3"
