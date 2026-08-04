@@ -70,13 +70,7 @@ unyt_watchtower_hc_store = { path = "crates/hc_store" }
 unyt_watchtower_collector = { path = "crates/collector" }
 
 # Shared Holochain client helpers (ham = Holochain AppWebsocket/Admin helpers).
-ham = { git = "https://github.com/unytco/ham.git", branch = "main" }
-
-# Local-only override so verification picks up the in-tree ham changes.
-# Drop this once the 0.7 ham release is pushed to
-# https://github.com/unytco/ham.git on main.
-[patch."https://github.com/unytco/ham.git"]
-ham = { path = "../ham" }
+ham = { git = "https://github.com/unytco/ham.git", branch = "main-0.7" }
 
 [profile.release]
 lto = "thin"
