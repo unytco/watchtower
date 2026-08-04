@@ -1,16 +1,14 @@
 //! Size-budget helpers for Tier-1 payloads.
 
-use crate::dto::DnaSnapshot;
 use crate::MAX_DNA_SNAPSHOT_BYTES;
+use crate::dto::DnaSnapshot;
 use serde::Serialize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SizeBudgetError {
     #[error("serialize failed: {0}")]
     Serialize(#[from] serde_json::Error),
-    #[error(
-        "dna snapshot for {dna_b64} is {actual} bytes, exceeds budget {budget}"
-    )]
+    #[error("dna snapshot for {dna_b64} is {actual} bytes, exceeds budget {budget}")]
     Exceeded {
         dna_b64: String,
         actual: usize,
