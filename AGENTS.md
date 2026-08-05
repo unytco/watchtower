@@ -133,11 +133,13 @@ a quiet network. Chasing the compiler to green proves nothing.
   which writes through `holochain_data`'s own API and reads back
   through `hc_store`. Never replace those fixtures with hand-written
   `CREATE TABLE` — that is precisely how the 0.7 break went unnoticed.
-- On any Holochain bump, additionally point the reads at a **real
-  conductor** (a sweettest data root under
-  `/tmp/**/holochain-test-environments*/`, passphrase `passphrase`)
-  and cross-check the counts against `holochain_data`'s own queries
-  over the same file.
+- On any Holochain bump, additionally cross-check the reads against a **real
+  conductor**. The test that does this (`tests/real_schema.rs`) is `#[ignore]`d —
+  run it with `cargo test --ignored` and `WT_REAL_ROOTS` set to conductor data
+  roots (passphrase `passphrase`). A sweettest's own roots live in a `TempDir`
+  that self-deletes when the test ends, so copy them out first or point at a
+  standing conductor; then cross-check the counts against `holochain_data`'s own
+  queries over the same file.
 
 ### Opening databases
 
