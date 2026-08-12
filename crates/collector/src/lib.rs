@@ -11,12 +11,12 @@ pub mod tier1;
 
 pub use config::{CollectorConfig, HolochainConfig};
 pub use exports::Exporter;
-pub use tier1::collect_node_snapshot;
+pub use tier1::{Collected, collect_node_snapshot};
 
 /// Load the SQLCipher key from the lair passphrase file. Shared between
 /// Tier-1 collection and Tier-2 exports so that every DB open sees the
 /// same key derivation.
-pub(crate) fn tier1_key(
+pub(crate) async fn tier1_key(
     cfg: &CollectorConfig,
 ) -> Result<Option<unyt_watchtower_hc_store::retrieve::Key>> {
     let passphrase = std::fs::read_to_string(&cfg.holochain.lair_passphrase_file)?;
@@ -24,10 +24,9 @@ pub(crate) fn tier1_key(
     let mut locked = sodoken::LockedArray::new(passphrase.len())
         .map_err(|e| CollectorError::Other(format!("sodoken: {e}")))?;
     locked.lock().copy_from_slice(passphrase.as_bytes());
-    let key = unyt_watchtower_hc_store::retrieve::load_database_key(
-        &cfg.holochain.data_root,
-        locked,
-    )?;
+    let key =
+        unyt_watchtower_hc_store::retrieve::load_database_key(&cfg.holochain.data_root, locked)
+            .await?;
     Ok(key)
 }
 

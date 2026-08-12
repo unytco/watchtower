@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tabled::{settings::Style, Table, Tabled};
+use tabled::{Table, Tabled, settings::Style};
 use unyt_watchtower_core::{DnaSnapshot, NodeSnapshot, WarrantProofSummary, WarrantSummary};
 
 pub fn status(snap: &NodeSnapshot, observer_id: &str) {

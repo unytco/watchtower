@@ -2,7 +2,7 @@
   description = "Flake for unyt-watchtower: Holochain observability CLI + Cloudflare dashboard";
 
   inputs = {
-    holonix.url = "github:holochain/holonix?ref=main-0.6";
+    holonix.url = "github:holochain/holonix?ref=main-0.7";
 
     nixpkgs.follows = "holonix/nixpkgs";
     flake-parts.follows = "holonix/flake-parts";

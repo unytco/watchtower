@@ -2,7 +2,7 @@
 //!
 //! Shape:
 //! 1. Open the conductor DB, enumerate DNAs via the admin websocket.
-//! 2. For each DNA, open its DHT / authored / cache DBs via hc_store.
+//! 2. For each DNA, open its DHT database via hc_store.
 //! 3. Walk the queries in [`unyt_watchtower_hc_store::retrieve`] and
 //!    [`unyt_watchtower_hc_store::extensions`], converting to Tier-1 DTOs.
 //! 4. Enforce the per-DNA size budget; drop the lowest-value rows first
@@ -24,37 +24,86 @@ use holo_hash::DnaHash;
 use holochain_zome_types::prelude::{ChainIntegrityWarrant, WarrantProof};
 use std::collections::HashMap;
 
+/// What one collection pass produced: the snapshot, and how many reads had to
+/// be degraded to get it.
+///
+/// The count exists because every degradation below reports an empty or zero
+/// value that is indistinguishable from a genuinely quiet network. It reaches
+/// the ingest payload as `SelfHealth::n_errors_this_cycle`, which alerts fire
+/// off — without it, a node whose reads broke after a Holochain upgrade shows
+/// green and the only evidence is `journalctl` on that host.
+pub struct Collected {
+    pub node: NodeSnapshot,
+    pub degraded_reads: u32,
+}
+
+/// Counts reads this pass had to degrade. Shared across the whole pass, so one
+/// number covers the conductor reads and every DNA.
+#[derive(Default)]
+pub(crate) struct DegradedReads(std::sync::atomic::AtomicU32);
+
+impl DegradedReads {
+    fn record(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn count(&self) -> u32 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// Run one Tier-1 collection pass. This is pure: it never writes files.
 pub async fn collect_node_snapshot(
     cfg: &CollectorConfig,
     admin: &holochain_client::AdminWebsocket,
-) -> Result<NodeSnapshot> {
+) -> Result<Collected> {
+    let degraded = DegradedReads::default();
     let apps = admin
         .list_apps(None)
         .await
         .map_err(CollectorError::Client)?;
 
-    let mut conductor_snap = conductor_snapshot(cfg, admin).await?;
-    conductor_snap.running_apps = apps
-        .iter()
-        .filter(|a| matches!(a.status, holochain_types::app::AppStatus::Enabled))
-        .count() as u32;
-    conductor_snap.paused_apps = apps
-        .iter()
-        .filter(|a| matches!(a.status, holochain_types::app::AppStatus::AwaitingMemproofs))
-        .count() as u32;
-    conductor_snap.disabled_apps = apps
-        .iter()
-        .filter(|a| matches!(a.status, holochain_types::app::AppStatus::Disabled(_)))
-        .count() as u32;
+    // One key unlock per pass: deriving it runs argon2, which is deliberately
+    // slow, and every database this pass opens uses the same key.
+    let key = crate::tier1_key(cfg).await?;
+    let conductor =
+        retrieve::open_conductor_database(&cfg.holochain.data_root, key.as_ref()).await?;
+
+    // A failed read here reports `nonce_duplicate_count: 0`, which is the
+    // "no replay attempts" value — hence the count, not just the log.
+    let nonce = warn_on_err(
+        extensions::nonce_stats(&conductor).await,
+        "nonce_stats",
+        &degraded,
+    );
+
+    let conductor_snap = ConductorSnapshot {
+        holochain_version: None,
+        admin_port: Some(cfg.holochain.admin_port),
+        running_apps: count_status(&apps, |s| {
+            matches!(s, holochain_types::app::AppStatus::Enabled)
+        }),
+        paused_apps: count_status(&apps, |s| {
+            matches!(s, holochain_types::app::AppStatus::AwaitingMemproofs)
+        }),
+        disabled_apps: count_status(&apps, |s| {
+            matches!(s, holochain_types::app::AppStatus::Disabled(_))
+        }),
+        nonce_count: nonce.unique_count as u32,
+        nonce_duplicate_count: nonce.duplicate_count as u32,
+    };
+
+    let blocks = warn_on_err(collect_blocks(&conductor).await, "get_blocks", &degraded);
+    conductor.close().await;
 
     let dna_hashes = admin.list_dnas().await.map_err(CollectorError::Client)?;
 
     let mut dnas = Vec::with_capacity(dna_hashes.len());
     for dna_hash in &dna_hashes {
-        match collect_dna_snapshot(cfg, dna_hash) {
+        match collect_dna_snapshot(cfg, dna_hash, key.as_ref(), &degraded).await {
             Ok(snap) => dnas.push(snap),
             Err(e) => {
+                degraded.record();
                 tracing::warn!(
                     dna = %dna_hash,
                     error = %e,
@@ -74,41 +123,26 @@ pub async fn collect_node_snapshot(
         })
         .collect();
 
-    let blocks = collect_blocks(cfg).unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "failed to read blocks");
-        Vec::new()
-    });
-
-    Ok(NodeSnapshot {
-        conductor: conductor_snap,
-        dnas,
-        apps: app_summaries,
-        blocks,
+    Ok(Collected {
+        node: NodeSnapshot {
+            conductor: conductor_snap,
+            dnas,
+            apps: app_summaries,
+            blocks,
+        },
+        degraded_reads: degraded.count(),
     })
 }
 
-async fn conductor_snapshot(
-    cfg: &CollectorConfig,
-    _admin: &holochain_client::AdminWebsocket,
-) -> Result<ConductorSnapshot> {
-    let mut key = load_key(cfg)?;
-    let mut conductor = retrieve::open_conductor_database(&cfg.holochain.data_root, key.as_mut())?;
-    let nonce = extensions::nonce_stats(&mut conductor).unwrap_or_default();
-    Ok(ConductorSnapshot {
-        holochain_version: None,
-        admin_port: Some(cfg.holochain.admin_port),
-        running_apps: 0,
-        paused_apps: 0,
-        disabled_apps: 0,
-        nonce_count: nonce.unique_count as u32,
-        nonce_duplicate_count: nonce.duplicate_count as u32,
-    })
+fn count_status(
+    apps: &[holochain_conductor_api::AppInfo],
+    pred: impl Fn(&holochain_types::app::AppStatus) -> bool,
+) -> u32 {
+    apps.iter().filter(|a| pred(&a.status)).count() as u32
 }
 
-fn collect_blocks(cfg: &CollectorConfig) -> Result<Vec<BlockSummary>> {
-    let mut key = load_key(cfg)?;
-    let mut conductor = retrieve::open_conductor_database(&cfg.holochain.data_root, key.as_mut())?;
-    let rows = retrieve::get_blocks(&mut conductor)?;
+async fn collect_blocks(conductor: &retrieve::HolochainDb) -> Result<Vec<BlockSummary>> {
+    let rows = retrieve::get_blocks(conductor).await?;
     Ok(rows
         .into_iter()
         .map(|b| BlockSummary {
@@ -120,44 +154,42 @@ fn collect_blocks(cfg: &CollectorConfig) -> Result<Vec<BlockSummary>> {
         .collect())
 }
 
-fn collect_dna_snapshot(cfg: &CollectorConfig, dna_hash: &DnaHash) -> Result<DnaSnapshot> {
-    let mut key = load_key(cfg)?;
+async fn collect_dna_snapshot(
+    cfg: &CollectorConfig,
+    dna_hash: &DnaHash,
+    key: Option<&retrieve::Key>,
+    degraded: &DegradedReads,
+) -> Result<DnaSnapshot> {
+    // Since 0.7 one database per DNA holds everything this pass reads: ops,
+    // actions, chain locks, scheduled functions, cap grants and slice hashes.
+    let dht = retrieve::open_dht_database(&cfg.holochain.data_root, dna_hash, key).await?;
+    let snap = collect_from_dht(cfg, dna_hash, &dht, degraded).await;
+    dht.close().await;
+    snap
+}
 
-    let mut dht = retrieve::open_holochain_database(
-        &cfg.holochain.data_root,
-        &retrieve::DbKind::Dht,
-        dna_hash,
-        key.as_mut(),
-    )?;
-
-    let dna_b64 = tag::b64url(&dna_hash.get_raw_39());
+async fn collect_from_dht(
+    cfg: &CollectorConfig,
+    dna_hash: &DnaHash,
+    dht: &retrieve::HolochainDb,
+    degraded: &DegradedReads,
+) -> Result<DnaSnapshot> {
+    let dna_b64 = tag::b64url(dna_hash.get_raw_39());
     let dna_tag = cfg.dna_tags.get(&dna_b64).cloned();
 
     // Agents + per-agent action counts (fast path).
-    let counts = retrieve::count_actions_by_author(&mut dht)?;
+    let counts = retrieve::count_actions_by_author(dht).await?;
     let count_map: HashMap<Vec<u8>, i64> = counts
         .iter()
         .map(|(k, v)| (k.get_raw_39().to_vec(), *v))
         .collect();
 
-    let mut cache = retrieve::open_holochain_database(
-        &cfg.holochain.data_root,
-        &retrieve::DbKind::Cache,
-        dna_hash,
-        load_key(cfg)?.as_mut(),
-    )
-    .ok();
-
-    let agents_raw = if let Some(cache) = cache.as_mut() {
-        retrieve::list_discovered_agents(&mut dht, cache)?
-    } else {
-        Vec::new()
-    };
+    let agents_raw = retrieve::list_discovered_agents(dht).await?;
 
     // Warrants — these are small (one row per warrant). We ship them all,
     // and `enforce_budget` will trim them only if everything else has been
     // dropped first.
-    let warrant_records = retrieve::get_warrants(&mut dht).unwrap_or_default();
+    let warrant_records = warn_on_err(retrieve::get_warrants(dht).await, "get_warrants", degraded);
     let mut issued: HashMap<String, u32> = HashMap::new();
     let mut against: HashMap<String, u32> = HashMap::new();
     let warrants: Vec<WarrantSummary> = warrant_records
@@ -172,14 +204,15 @@ fn collect_dna_snapshot(cfg: &CollectorConfig, dna_hash: &DnaHash) -> Result<Dna
 
     // Per-agent migration flags, read from the SAME `dht` connection already
     // open for this DNA — no extra cell is fetched or scanned. Keyed by the
-    // agent's raw-39 bytes. A read failure degrades to "no migration signal"
-    // rather than aborting the snapshot.
+    // agent's raw-39 bytes.
+    //
+    // Propagated, not degraded: an empty map is indistinguishable from a
+    // healthy pre-migration network, and this is the counter operators watch
+    // during a migration window. Dropping the whole DNA (logged by the caller)
+    // is the honest failure — reporting every agent as un-migrated is not.
     let migration_map: HashMap<Vec<u8>, extensions::MigrationStatusRow> =
-        extensions::migration_status_by_author(&mut dht)
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "migration_status_by_author failed");
-                Vec::new()
-            })
+        extensions::migration_status_by_author(dht)
+            .await?
             .into_iter()
             .map(|r| (r.author.get_raw_39().to_vec(), r))
             .collect();
@@ -191,8 +224,7 @@ fn collect_dna_snapshot(cfg: &CollectorConfig, dna_hash: &DnaHash) -> Result<Dna
             let raw = a.get_raw_39().to_vec();
             let b64 = tag::b64url(&raw);
             let action_count = count_map.get(&raw).copied().unwrap_or(0) as u32;
-            let (chain_closed, opening_summary_present) =
-                migration_flags(migration_map.get(&raw));
+            let (chain_closed, opening_summary_present) = migration_flags(migration_map.get(&raw));
             let now = Utc::now().to_rfc3339();
             AgentSummary {
                 agent_b64: b64.clone(),
@@ -210,17 +242,17 @@ fn collect_dna_snapshot(cfg: &CollectorConfig, dna_hash: &DnaHash) -> Result<Dna
 
     // A closer/opener is normally also discovered (it joined this DNA with an
     // `AgentValidationPkg`, so `list_discovered_agents` names it). But discovery
-    // and the migration read can disagree at the edges — a cache eviction, or a
-    // close whose op integrated before its `AgentValidationPkg` op did — and a
-    // migration counter must never under-count. Fold any migration author not
-    // already represented into the reported set as a minimal flagged row, still
-    // from the same `dht` connection (no new scan).
+    // and the migration read can disagree at the edges — a close whose action
+    // reached validity before its `AgentValidationPkg` did — and a migration
+    // counter must never under-count. Fold any migration author not already
+    // represented into the reported set as a minimal flagged row, still from the
+    // same `dht` connection (no new scan).
     append_migration_only_agents(&mut agents, &migration_map, &cfg.agent_tags);
 
     let chain_summaries: Vec<ChainSummary> = counts
         .iter()
         .map(|(agent, c)| {
-            let b64 = tag::b64url(&agent.get_raw_39());
+            let b64 = tag::b64url(agent.get_raw_39());
             let now = Utc::now().to_rfc3339();
             ChainSummary {
                 agent_b64: b64,
@@ -231,96 +263,95 @@ fn collect_dna_snapshot(cfg: &CollectorConfig, dna_hash: &DnaHash) -> Result<Dna
         })
         .collect();
 
-    // Slice hashes, chain locks, and scheduled functions live in the
-    // per-(dna, agent) authored DB. Enumerate every authored identity this
-    // node owns for this DNA, open each DB, and union the rows. A single
-    // unreadable authored DB (e.g. wrong key, missing file) should not
-    // abort the whole DNA snapshot.
-    let mut slice_hashes: Vec<SliceHashRow> = Vec::new();
-    let mut chain_locks: Vec<ChainLockRow> = Vec::new();
-    let mut scheduled_functions: Vec<ScheduledFunctionRow> = Vec::new();
+    let slice_hashes: Vec<SliceHashRow> = warn_on_err(
+        retrieve::get_slice_hashes(dht).await,
+        "get_slice_hashes",
+        degraded,
+    )
+    .into_iter()
+    .map(|r| SliceHashRow {
+        arc_start: r.arc_start as u32,
+        arc_end: r.arc_end as u32,
+        slice_index: r.slice_index as u64,
+        hash_b64: tag::b64url(&r.hash),
+    })
+    .collect();
 
-    let authored_pairs = retrieve::list_authored_identities(&cfg.holochain.data_root)
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "list_authored_identities failed");
-            Vec::new()
-        });
+    let chain_locks: Vec<ChainLockRow> = warn_on_err(
+        extensions::list_chain_locks(dht).await,
+        "list_chain_locks",
+        degraded,
+    )
+    .into_iter()
+    .map(|r| ChainLockRow {
+        author_b64: tag::b64url(r.author.get_raw_39()),
+        subject_b64: tag::b64url(&r.subject),
+        expires_at_iso: ts_to_iso(r.expires_at_us),
+    })
+    .collect();
 
-    for (authored_dna, authored_agent) in authored_pairs.iter().filter(|(d, _)| d == dna_hash) {
-        let Ok(mut authored) = retrieve::open_holochain_database(
-            &cfg.holochain.data_root,
-            &retrieve::DbKind::Authored(authored_agent.clone()),
-            authored_dna,
-            load_key(cfg)?.as_mut(),
-        ) else {
-            tracing::warn!(
-                dna = %authored_dna,
-                agent = %authored_agent,
-                "failed to open authored db; skipping"
-            );
-            continue;
-        };
-
-        match retrieve::get_slice_hashes(&mut authored) {
-            Ok(rows) => slice_hashes.extend(rows.into_iter().map(|r| SliceHashRow {
-                arc_start: r.arc_start as u32,
-                arc_end: r.arc_end as u32,
-                slice_index: r.slice_index as u64,
-                hash_b64: tag::b64url(&r.hash),
-            })),
-            Err(e) => tracing::warn!(error = %e, "get_slice_hashes failed"),
-        }
-
-        match extensions::list_chain_locks(&mut authored) {
-            Ok(rows) => chain_locks.extend(rows.into_iter().map(|r| ChainLockRow {
-                author_b64: tag::b64url(&r.author.get_raw_39()),
-                subject_b64: tag::b64url(&r.subject),
-                expires_at_iso: ts_to_iso(r.expires_at_us),
-            })),
-            Err(e) => tracing::warn!(error = %e, "list_chain_locks failed"),
-        }
-
-        match extensions::list_scheduled_functions(&mut authored) {
-            Ok(rows) => {
-                scheduled_functions.extend(rows.into_iter().map(|r| ScheduledFunctionRow {
-                    author_b64: tag::b64url(&r.author.get_raw_39()),
-                    zome: r.zome,
-                    fn_name: r.fn_name,
-                    scheduled_at_iso: ts_to_iso(r.scheduled_at_us),
-                }))
-            }
-            Err(e) => tracing::warn!(error = %e, "list_scheduled_functions failed"),
-        }
-    }
+    let scheduled_functions: Vec<ScheduledFunctionRow> = warn_on_err(
+        extensions::list_scheduled_functions(dht).await,
+        "list_scheduled_functions",
+        degraded,
+    )
+    .into_iter()
+    .map(|r| ScheduledFunctionRow {
+        author_b64: tag::b64url(r.author.get_raw_39()),
+        zome: r.zome,
+        fn_name: r.fn_name,
+        scheduled_at_iso: ts_to_iso(r.scheduled_at_us),
+    })
+    .collect();
 
     // Validation coverage bottom-N.
-    let coverage_rows =
-        extensions::validation_coverage_bottom_n(&mut dht, cfg.validation_coverage_bottom_n)
-            .unwrap_or_default();
-    let validation_coverage: Vec<ValidationCoverageRow> = coverage_rows
-        .into_iter()
-        .map(|r| ValidationCoverageRow {
-            op_hash_b64: tag::b64url(&r.op_hash),
-            receipt_count: r.receipt_count as u32,
-        })
-        .collect();
+    let validation_coverage: Vec<ValidationCoverageRow> = warn_on_err(
+        extensions::validation_coverage_bottom_n(dht, cfg.validation_coverage_bottom_n).await,
+        "validation_coverage_bottom_n",
+        degraded,
+    )
+    .into_iter()
+    .map(|r| ValidationCoverageRow {
+        op_hash_b64: tag::b64url(&r.op_hash),
+        receipt_count: r.receipt_count as u32,
+    })
+    .collect();
 
-    let cap_grant_rows = extensions::list_capability_grants(&mut dht).unwrap_or_default();
-    let cap_grants: Vec<CapGrantSummary> = cap_grant_rows
-        .into_iter()
-        .map(|r| CapGrantSummary {
-            app_id: String::new(),
-            cell_b64: String::new(),
-            tag: r.tag,
-            function_count: r.function_count as u32,
-            access_type: r.access_type,
-        })
-        .collect();
+    let cap_grants: Vec<CapGrantSummary> = warn_on_err(
+        extensions::list_capability_grants(dht).await,
+        "list_capability_grants",
+        degraded,
+    )
+    .into_iter()
+    .map(|r| CapGrantSummary {
+        app_id: String::new(),
+        cell_b64: String::new(),
+        tag: r.tag,
+        function_count: r.function_count as u32,
+        access_type: r.access_type,
+    })
+    .collect();
 
-    let pending = extensions::count_pending_ops(&mut dht).unwrap_or(0) as u32;
-    let integrated = extensions::count_integrated_ops(&mut dht).unwrap_or(0) as u32;
+    // Op counters and lag are load-bearing health signals. A failed read still
+    // reports zero — the Tier-1 DTO has no "unknown" — so `warn_on_err` logs it
+    // loudly; the log is the only thing distinguishing a broken read from an
+    // idle node. Giving these fields an explicit unknown is B107.
+    let pending = warn_on_err(
+        extensions::count_pending_ops(dht).await,
+        "count_pending_ops",
+        degraded,
+    ) as u32;
+    let integrated = warn_on_err(
+        extensions::count_integrated_ops(dht).await,
+        "count_integrated_ops",
+        degraded,
+    ) as u32;
 
-    let lag = extensions::integration_lag(&mut dht, cfg.lag_window_s).unwrap_or_default();
+    let lag = warn_on_err(
+        extensions::integration_lag(dht, cfg.lag_window_s).await,
+        "integration_lag",
+        degraded,
+    );
     let derived_metrics = DerivedMetrics {
         integration_rate: lag.integration_rate,
         lag_p50_ms: lag.p50_ms,
@@ -352,6 +383,21 @@ fn collect_dna_snapshot(cfg: &CollectorConfig, dna_hash: &DnaHash) -> Result<Dna
     enforce_budget(&mut snap)?;
 
     Ok(snap)
+}
+
+/// Degrade one optional read to its empty value, but never silently: a query
+/// that starts failing after a Holochain upgrade would otherwise look exactly
+/// like a node with nothing to report.
+fn warn_on_err<T: Default, E: std::fmt::Display>(
+    result: std::result::Result<T, E>,
+    what: &str,
+    degraded: &DegradedReads,
+) -> T {
+    result.unwrap_or_else(|e| {
+        degraded.record();
+        tracing::warn!(error = %e, query = what, "read failed; reporting empty");
+        T::default()
+    })
 }
 
 /// Trim snapshot fields in a fixed order until the JSON fits under the
@@ -396,10 +442,6 @@ fn enforce_budget(snap: &mut DnaSnapshot) -> Result<()> {
     Ok(())
 }
 
-fn load_key(cfg: &CollectorConfig) -> Result<Option<unyt_watchtower_hc_store::retrieve::Key>> {
-    crate::tier1_key(cfg)
-}
-
 /// Project a per-author migration row onto the two `AgentSummary` flags. An
 /// absent row (the agent issued neither `CloseChain` nor `OpenChain`) reads as
 /// `(false, false)`.
@@ -427,7 +469,7 @@ fn append_migration_only_agents(
     let mut extra: Vec<AgentSummary> = migration_map
         .values()
         .filter_map(|row| {
-            let b64 = tag::b64url(&row.author.get_raw_39());
+            let b64 = tag::b64url(row.author.get_raw_39());
             if seen.contains(b64.as_str()) {
                 return None;
             }
@@ -453,8 +495,11 @@ fn append_migration_only_agents(
 }
 
 fn ts_to_iso(micros: i64) -> String {
-    let secs = micros / 1_000_000;
-    let nanos = ((micros % 1_000_000) as u32) * 1000;
+    // `rem_euclid`, not `%`: a negative remainder cast to `u32` wraps to ~4.3e9
+    // and then overflows when scaled to nanoseconds. Timestamps come from
+    // remote-authored signed content, so a negative one is reachable.
+    let secs = micros.div_euclid(1_000_000);
+    let nanos = (micros.rem_euclid(1_000_000) as u32) * 1000;
     DateTime::<Utc>::from_timestamp(secs, nanos)
         .map(|d| d.to_rfc3339())
         .unwrap_or_default()
@@ -468,20 +513,20 @@ fn ts_to_iso(micros: i64) -> String {
 /// whether the warrant was accepted or rejected.
 pub(crate) fn warrant_summary(w: &WarrantRecord) -> WarrantSummary {
     let warrant = w.warrant.data();
-    let author_b64 = tag::b64url(&warrant.author.get_raw_39());
-    let target_b64 = tag::b64url(&warrant.warrantee.get_raw_39());
+    let author_b64 = tag::b64url(warrant.author.get_raw_39());
+    let target_b64 = tag::b64url(warrant.warrantee.get_raw_39());
     let signature_b64 = tag::b64url(&w.warrant.signature().0);
 
     let (warrant_type, proof_summary) = decode_proof(&warrant.proof);
 
     WarrantSummary {
-        op_hash_b64: tag::b64url(&w.dht_op.hash.get_raw_39()),
+        op_hash_b64: tag::b64url(w.dht_op.hash.get_raw_39()),
         warrant_type,
         author_b64,
         target_b64,
         ts_iso: ts_to_iso(warrant.timestamp.0),
         authored_ts_iso: ts_to_iso(w.dht_op.authored_timestamp.0),
-        integrated_ts_iso: w.dht_op.meta.when_integrated.map(|t| ts_to_iso(t.0)),
+        integrated_ts_iso: w.dht_op.when_integrated.map(|t| ts_to_iso(t.0)),
         validation_status: w.dht_op.validation_status.map(validation_status_label),
         signature_b64,
         proof_summary,
@@ -495,23 +540,28 @@ fn decode_proof(proof: &WarrantProof) -> (String, WarrantProofSummary) {
                 action_author,
                 action: (action_hash, _sig),
                 chain_op_type,
+                // 0.7 also carries a human-readable `reason`; surfacing it would
+                // widen the ingest schema, so it stays out of this port.
+                reason: _,
             } => (
                 "InvalidChainOp".to_string(),
                 WarrantProofSummary::InvalidChainOp {
-                    action_author_b64: tag::b64url(&action_author.get_raw_39()),
-                    action_hash_b64: tag::b64url(&action_hash.get_raw_39()),
+                    action_author_b64: tag::b64url(action_author.get_raw_39()),
+                    action_hash_b64: tag::b64url(action_hash.get_raw_39()),
                     chain_op_type: format!("{chain_op_type:?}"),
                 },
             ),
             ChainIntegrityWarrant::ChainFork {
                 chain_author,
                 action_pair: ((a_hash, _a_sig), (b_hash, _b_sig)),
+                // 0.7 also carries the forking `seq`; see the note above.
+                seq: _,
             } => (
                 "ChainFork".to_string(),
                 WarrantProofSummary::ChainFork {
-                    chain_author_b64: tag::b64url(&chain_author.get_raw_39()),
-                    action_a_hash_b64: tag::b64url(&a_hash.get_raw_39()),
-                    action_b_hash_b64: tag::b64url(&b_hash.get_raw_39()),
+                    chain_author_b64: tag::b64url(chain_author.get_raw_39()),
+                    action_a_hash_b64: tag::b64url(a_hash.get_raw_39()),
+                    action_b_hash_b64: tag::b64url(b_hash.get_raw_39()),
                 },
             ),
         },
@@ -530,8 +580,8 @@ fn validation_status_label(status: ValidationStatus) -> String {
 #[cfg(test)]
 mod tests {
     //! Unit tests for the proof decoder. We can't easily build a full
-    //! `WarrantRecord` (it owns a `ChainOp<DhtMeta>` with private timestamps
-    //! and a `SignedWarrant`) without standing up a SQLite DB, but
+    //! `WarrantRecord` (it owns a `WarrantOp` and a `SignedWarrant`) without
+    //! standing up a SQLite DB, but
     //! `decode_proof` is the part that's most likely to drift when
     //! Holochain adds new `ChainIntegrityWarrant` variants — so we cover
     //! that directly here.
@@ -556,7 +606,8 @@ mod tests {
         let proof = WarrantProof::ChainIntegrity(ChainIntegrityWarrant::InvalidChainOp {
             action_author: agent(0xaa),
             action: (action(0xbb), sig()),
-            chain_op_type: ChainOpType::StoreEntry,
+            chain_op_type: ChainOpType::CreateEntry,
+            reason: "entry failed app validation".to_string(),
         });
         let (kind, summary) = decode_proof(&proof);
         assert_eq!(kind, "InvalidChainOp");
@@ -566,9 +617,9 @@ mod tests {
                 action_hash_b64,
                 chain_op_type,
             } => {
-                assert_eq!(chain_op_type, "StoreEntry");
-                assert_eq!(action_author_b64, tag::b64url(&agent(0xaa).get_raw_39()));
-                assert_eq!(action_hash_b64, tag::b64url(&action(0xbb).get_raw_39()));
+                assert_eq!(chain_op_type, "CreateEntry");
+                assert_eq!(action_author_b64, tag::b64url(agent(0xaa).get_raw_39()));
+                assert_eq!(action_hash_b64, tag::b64url(action(0xbb).get_raw_39()));
             }
             other => panic!("expected InvalidChainOp, got {other:?}"),
         }
@@ -579,6 +630,7 @@ mod tests {
         let proof = WarrantProof::ChainIntegrity(ChainIntegrityWarrant::ChainFork {
             chain_author: agent(0x11),
             action_pair: ((action(0x22), sig()), (action(0x33), sig())),
+            seq: 7,
         });
         let (kind, summary) = decode_proof(&proof);
         assert_eq!(kind, "ChainFork");
@@ -588,13 +640,25 @@ mod tests {
                 action_a_hash_b64,
                 action_b_hash_b64,
             } => {
-                assert_eq!(chain_author_b64, tag::b64url(&agent(0x11).get_raw_39()));
-                assert_eq!(action_a_hash_b64, tag::b64url(&action(0x22).get_raw_39()));
-                assert_eq!(action_b_hash_b64, tag::b64url(&action(0x33).get_raw_39()));
+                assert_eq!(chain_author_b64, tag::b64url(agent(0x11).get_raw_39()));
+                assert_eq!(action_a_hash_b64, tag::b64url(action(0x22).get_raw_39()));
+                assert_eq!(action_b_hash_b64, tag::b64url(action(0x33).get_raw_39()));
                 assert_ne!(action_a_hash_b64, action_b_hash_b64);
             }
             other => panic!("expected ChainFork, got {other:?}"),
         }
+    }
+
+    /// Timestamps come from remote-authored signed content, so a negative one
+    /// is reachable. Before `rem_euclid`, the negative remainder wrapped
+    /// through `as u32` and overflowed when scaled to nanoseconds — a panic in
+    /// a debug build, in a daemon that must never panic on bad input.
+    #[test]
+    fn ts_to_iso_survives_a_negative_timestamp() {
+        assert_eq!(ts_to_iso(0), "1970-01-01T00:00:00+00:00");
+        // One microsecond before the epoch.
+        assert_eq!(ts_to_iso(-1), "1969-12-31T23:59:59.999999+00:00");
+        assert_eq!(ts_to_iso(i64::MIN), "");
     }
 
     #[test]
@@ -638,8 +702,8 @@ mod tests {
 
         let discovered = agent(0xaa);
         let undiscovered_closer = agent(0xbb);
-        let discovered_b64 = tag::b64url(&discovered.get_raw_39());
-        let closer_b64 = tag::b64url(&undiscovered_closer.get_raw_39());
+        let discovered_b64 = tag::b64url(discovered.get_raw_39());
+        let closer_b64 = tag::b64url(undiscovered_closer.get_raw_39());
 
         // One agent was discovered (it has an action count); two agents carry a
         // migration flag — the discovered one and an undiscovered closer.

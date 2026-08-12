@@ -4,16 +4,10 @@
 // Upstream: https://github.com/ThetaSinner/hc-ops
 // Copyright (C) 2025-2026 Unyt contributors (this modified version)
 //
-// This file is vendored from ThetaSinner/hc-ops @
-// b7359a7d4b8d8e5021eb0645eae30f90bc1301d0. Last sync: 2026-04.
-// Sync procedure: see watchtower/AGENTS.md "Syncing `hc_store` from
-// upstream `hc-ops`".
-//
-// Modifications: rewrote `transform_msgpack_blob` to decode via `rmpv`
-// (handles `Binary` payloads and integer map keys) instead of
-// `holochain_serialized_bytes::decode`; added the `msgpack_value_to_json`
-// helper; switched action `tag` field handling to `transform_msgpack_blob`;
-// otherwise tracks upstream.
+// The JSON prettification here originated in ThetaSinner/hc-ops @
+// b7359a7d4b8d8e5021eb0645eae30f90bc1301d0 and is no longer synced from it:
+// upstream targets Holochain 0.6, whose action and op shapes this file no
+// longer matches.
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -28,19 +22,19 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use crate::retrieve::{BlockRecord, ChainOp, ChainRecord, Record, WarrantRecord};
+use crate::retrieve::{BlockRecord, ChainRecord, LimboOp, Record, WarrantOp, WarrantRecord};
 use crate::{HcOpsError, HcOpsResult, HcOpsResultContextExt};
 use base64::Engine;
 use holo_hash::WarrantHash;
 use holochain_conductor_api::AppInfo;
+use holochain_integrity_types::prelude::Action;
 use holochain_types::network::Kitsune2NetworkMetrics;
 use holochain_zome_types::prelude::{
-    Action, ActionHash, AgentPubKey, AnyDhtHash, DhtOpHash, DnaHash, Entry, EntryHash,
-    SignedAction, SignedActionHashed, Timestamp,
+    ActionHash, AgentPubKey, AnyDhtHash, DhtOpHash, DnaHash, Entry, EntryHash, SignedActionHashed,
+    Timestamp,
 };
 use kitsune2_api::{AgentInfoSigned, TransportStats};
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -185,114 +179,89 @@ impl HumanReadable for AppInfo {
     }
 }
 
-impl<S: Debug + Serialize + DeserializeOwned> HumanReadable for ChainOp<S> {
-    fn as_human_readable_raw(&self) -> HcOpsResult<serde_json::Value> {
-        let mut dht_op: serde_json::Value = serde_json::from_str(&serde_json::to_string(&self)?)?;
+/// Prettify the op fields the three op shapes share. `basis_hash` is rendered
+/// generically: the column stores the type-stripped bytes, so it is rebuilt as
+/// an `External` hash and would not parse as a DHT hash.
+fn transform_op_fields(op: &mut serde_json::Value) -> HcOpsResult<()> {
+    replace_field(op, "hash", transform_dht_op_hash)?;
+    replace_field(op, "authored_timestamp", transform_timestamp)?;
 
-        replace_field(&mut dht_op, "hash", transform_dht_op_hash)?;
-        replace_field(&mut dht_op, "basis_hash", transform_any_linkable_hash)?;
-        replace_field(&mut dht_op, "action_hash", transform_action_or_warrant_hash)?;
-        replace_field(&mut dht_op, "authored_timestamp", transform_timestamp)?;
+    if op.get("basis_hash").is_some() {
+        replace_field(op, "basis_hash", transform_generic_hash)?;
+    }
+    if op.get("action_hash").is_some() {
+        replace_field(op, "action_hash", transform_action_or_warrant_hash)?;
+    }
+    if op.get("when_received").is_some() {
+        replace_field(op, "when_received", transform_timestamp)?;
+    }
+    if op.get("when_integrated").is_some() {
+        replace_field(op, "when_integrated", transform_timestamp)?;
+    }
 
-        if let Some(meta) = dht_op.get_mut("meta").and_then(|v| v.as_object_mut())
-            && let Some(last_validation_attempt) = meta.get("last_validation_attempt")
-        {
-            meta["last_validation_attempt"] = transform_timestamp(last_validation_attempt)?;
+    if let Some(meta) = op.get_mut("meta").and_then(|v| v.as_object_mut()) {
+        for field in [
+            "when_received",
+            "when_integrated",
+            "last_validation_attempt",
+        ] {
+            if let Some(value) = meta.get(field) {
+                meta[field] = transform_timestamp(value)?;
+            }
         }
+    }
 
-        Ok(dht_op)
+    Ok(())
+}
+
+fn op_as_human_readable<T: Serialize>(op: &T) -> HcOpsResult<serde_json::Value> {
+    let mut value: serde_json::Value = serde_json::to_value(op)?;
+    transform_op_fields(&mut value)?;
+    Ok(value)
+}
+
+fn op_summary(op: &serde_json::Value) -> serde_json::Value {
+    let mut summary = op.clone();
+    if let Some(obj) = summary.as_object_mut() {
+        obj.remove("meta");
+    }
+    summary
+}
+
+impl HumanReadable for LimboOp {
+    fn as_human_readable_raw(&self) -> HcOpsResult<serde_json::Value> {
+        op_as_human_readable(self)
     }
 
     fn as_human_readable_summary_raw(&self) -> HcOpsResult<serde_json::Value> {
-        let mut dht_op = self.as_human_readable_raw()?;
+        Ok(op_summary(&self.as_human_readable_raw()?))
+    }
+}
 
-        dht_op.as_object_mut().unwrap().remove("meta");
+impl HumanReadable for WarrantOp {
+    fn as_human_readable_raw(&self) -> HcOpsResult<serde_json::Value> {
+        op_as_human_readable(self)
+    }
 
-        Ok(dht_op)
+    fn as_human_readable_summary_raw(&self) -> HcOpsResult<serde_json::Value> {
+        Ok(op_summary(&self.as_human_readable_raw()?))
     }
 }
 
 impl HumanReadable for Action {
-    #[allow(clippy::collapsible_if)]
     fn as_human_readable_raw(&self) -> HcOpsResult<serde_json::Value> {
-        let mut action: serde_json::Value = serde_json::from_str(&serde_json::to_string(&self)?)?;
+        let mut action: serde_json::Value = serde_json::to_value(self)?;
 
-        if let Some(action) = action.as_object_mut() {
-            if action.contains_key("author") {
-                action["author"] = transform_agent_pub_key(&action["author"])?;
+        if let Some(header) = action.get_mut("header").and_then(|v| v.as_object_mut()) {
+            header["author"] = transform_agent_pub_key(&header["author"])?;
+            header["timestamp"] = transform_timestamp(&header["timestamp"])?;
+            if !header["prev_action"].is_null() {
+                header["prev_action"] = transform_action_hash(&header["prev_action"])?;
             }
+        }
 
-            if action.contains_key("timestamp") {
-                action["timestamp"] = transform_timestamp(&action["timestamp"])?;
-            }
-
-            if action.contains_key("prev_action") {
-                action["prev_action"] = transform_action_hash(&action["prev_action"])?;
-            }
-
-            if action.contains_key("entry_hash") {
-                action["entry_hash"] = transform_entry_hash(&action["entry_hash"])?;
-            }
-
-            if action.contains_key("type") {
-                if action["type"] == "Dna" {
-                    if action.contains_key("hash") {
-                        action["hash"] = transform_dna_hash(&action["hash"])?;
-                    }
-                }
-
-                if action["type"] == "CreateLink" {
-                    if action.contains_key("base_address") {
-                        action["base_address"] =
-                            transform_any_linkable_hash(&action["base_address"])?;
-                    }
-
-                    if action.contains_key("target_address") {
-                        action["target_address"] =
-                            transform_any_linkable_hash(&action["target_address"])?;
-                    }
-
-                    if action.contains_key("tag") {
-                        action["tag"] = transform_msgpack_blob(&action["tag"])?;
-                    }
-                }
-
-                if action["type"] == "DeleteLink" {
-                    if action.contains_key("base_address") {
-                        action["base_address"] =
-                            transform_any_linkable_hash(&action["base_address"])?;
-                    }
-
-                    if action.contains_key("link_add_address") {
-                        action["link_add_address"] =
-                            transform_action_hash(&action["link_add_address"])?;
-                    }
-                }
-
-                if action["type"] == "Update" {
-                    if action.contains_key("original_action_address") {
-                        action["original_action_address"] =
-                            transform_action_hash(&action["original_action_address"])?;
-                    }
-
-                    if action.contains_key("original_entry_address") {
-                        action["original_entry_address"] =
-                            transform_entry_hash(&action["original_entry_address"])?;
-                    }
-                }
-
-                if action["type"] == "Delete" {
-                    if action.contains_key("deletes_address") {
-                        action["deletes_address"] =
-                            transform_action_hash(&action["deletes_address"])?;
-                    }
-
-                    if action.contains_key("deletes_entry_address") {
-                        action["deletes_entry_address"] =
-                            transform_entry_hash(&action["deletes_entry_address"])?;
-                    }
-                }
-            }
+        if let Some(data) = action.get_mut("data").and_then(|v| v.as_object_mut()) {
+            transform_action_data(data)?;
         }
 
         Ok(action)
@@ -303,38 +272,71 @@ impl HumanReadable for Action {
     }
 }
 
-impl HumanReadable for SignedAction {
-    fn as_human_readable_raw(&self) -> HcOpsResult<serde_json::Value> {
-        let mut out = serde_json::Map::new();
-
-        out.insert("data".to_string(), self.action().as_human_readable_raw()?);
-
-        let sig = serde_json::from_str(&serde_json::to_string(&self.signature())?)?;
-        out.insert("signature".to_string(), transform_flatten_byte_array(&sig)?);
-
-        Ok(serde_json::Value::Object(out))
+/// Prettify the hash-bearing fields of one `ActionData` variant. `ActionData`
+/// is `#[serde(tag = "type")]`, so the variant's own fields sit alongside
+/// `type` in the same object.
+fn transform_action_data(data: &mut serde_json::Map<String, serde_json::Value>) -> HcOpsResult<()> {
+    // Present on Create and Update.
+    if data.contains_key("entry_hash") {
+        data["entry_hash"] = transform_entry_hash(&data["entry_hash"])?;
     }
 
-    fn as_human_readable_summary_raw(&self) -> HcOpsResult<serde_json::Value> {
-        let mut signed_action = self.as_human_readable_raw()?;
+    let Some(action_type) = data
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    else {
+        return Ok(());
+    };
 
-        let action = signed_action
-            .as_object_mut()
-            .and_then(|v| v.get_mut("data"))
-            .ok_or_else(|| HcOpsError::Other("Unexpected signed action structure".into()))?;
-
-        if let Some(action) = action.as_object_mut()
-            && action.contains_key("weight")
-        {
-            action.remove("weight");
+    match action_type.as_str() {
+        "Dna" => data["dna_hash"] = transform_dna_hash(&data["dna_hash"])?,
+        "CreateLink" => {
+            data["base_address"] = transform_any_linkable_hash(&data["base_address"])?;
+            data["target_address"] = transform_any_linkable_hash(&data["target_address"])?;
+            data["tag"] = transform_msgpack_blob(&data["tag"])?;
         }
-
-        signed_action
-            .as_object_mut()
-            .and_then(|v| v.remove("signature"));
-
-        Ok(signed_action)
+        "DeleteLink" => {
+            data["base_address"] = transform_any_linkable_hash(&data["base_address"])?;
+            data["link_add_address"] = transform_action_hash(&data["link_add_address"])?;
+        }
+        "Update" => {
+            data["original_action_address"] =
+                transform_action_hash(&data["original_action_address"])?;
+            data["original_entry_address"] = transform_entry_hash(&data["original_entry_address"])?;
+        }
+        "Delete" => {
+            data["deletes_address"] = transform_action_hash(&data["deletes_address"])?;
+            data["deletes_entry_address"] = transform_entry_hash(&data["deletes_entry_address"])?;
+        }
+        // `new_target` is optional; `transform_migration_target` passes a
+        // JSON null straight through, so no guard is needed here.
+        "CloseChain" => data["new_target"] = transform_migration_target(&data["new_target"])?,
+        "OpenChain" => {
+            data["prev_target"] = transform_migration_target(&data["prev_target"])?;
+            data["close_hash"] = transform_action_hash(&data["close_hash"])?;
+        }
+        _ => {}
     }
+
+    Ok(())
+}
+
+/// A `MigrationTarget` names either the DNA a chain moved to/from or the agent
+/// it was transferred to/from. Rendering it is what makes a migration export
+/// readable, so both arms are handled rather than left as raw byte arrays.
+fn transform_migration_target(input: &serde_json::Value) -> HcOpsResult<serde_json::Value> {
+    let mut target = input.clone();
+    let Some(obj) = target.as_object_mut() else {
+        return Ok(target);
+    };
+    if let Some(dna) = obj.get("Dna") {
+        obj["Dna"] = transform_dna_hash(dna)?;
+    }
+    if let Some(agent) = obj.get("Agent") {
+        obj["Agent"] = transform_agent_pub_key(agent)?;
+    }
+    Ok(target)
 }
 
 impl HumanReadable for SignedActionHashed {

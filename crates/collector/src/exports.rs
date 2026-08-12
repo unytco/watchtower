@@ -31,7 +31,7 @@ impl<'a> Exporter<'a> {
 
     /// Write the full chain of one agent in one DNA. Uses hc_store +
     /// human_readable to produce a JSON file with decoded entries.
-    pub fn agent_chain(
+    pub async fn agent_chain(
         &self,
         dna: &holo_hash::DnaHash,
         agent: &holo_hash::AgentPubKey,
@@ -39,26 +39,17 @@ impl<'a> Exporter<'a> {
         use unyt_watchtower_hc_store::readable::HumanReadableDisplay;
         use unyt_watchtower_hc_store::retrieve;
 
-        let mut key = crate::tier1_key(self.cfg)?;
-        let mut dht = retrieve::open_holochain_database(
-            &self.cfg.holochain.data_root,
-            &retrieve::DbKind::Dht,
-            dna,
-            key.as_mut(),
-        )?;
-        let mut cache = retrieve::open_holochain_database(
-            &self.cfg.holochain.data_root,
-            &retrieve::DbKind::Cache,
-            dna,
-            crate::tier1_key(self.cfg)?.as_mut(),
-        )
-        .ok();
-        let chain = retrieve::get_agent_chain(&mut dht, cache.as_mut(), agent)?;
+        let key = crate::tier1_key(self.cfg).await?;
+        let dht =
+            retrieve::open_dht_database(&self.cfg.holochain.data_root, dna, key.as_ref()).await?;
+        let chain = retrieve::get_agent_chain(&dht, agent).await;
+        dht.close().await;
+        let chain = chain?;
 
-        let path = self
-            .cfg
-            .exports_dir
-            .join(format!("chain_{}_{}_{}.json", dna, agent, Self::ts()));
+        let path =
+            self.cfg
+                .exports_dir
+                .join(format!("chain_{}_{}_{}.json", dna, agent, Self::ts()));
 
         let pretty = <Vec<_> as HumanReadableDisplay>::as_human_readable_pretty(&chain)
             .map_err(|e| CollectorError::Other(format!("readable: {e}")))?;
@@ -71,31 +62,45 @@ impl<'a> Exporter<'a> {
     /// Dump every integrated warrant in one DNA (or in every DNA if `dna`
     /// is `None`) with full decoded proofs and warrantor signatures. The
     /// observer's tags are not consulted; raw base64url hashes are written.
-    pub fn warrants(&self, dna: Option<&holo_hash::DnaHash>) -> Result<PathBuf> {
+    pub async fn warrants(&self, dna: Option<&holo_hash::DnaHash>) -> Result<PathBuf> {
         use unyt_watchtower_hc_store::readable::HumanReadableDisplay;
         use unyt_watchtower_hc_store::retrieve;
 
         let dnas: Vec<holo_hash::DnaHash> = match dna {
             Some(d) => vec![d.clone()],
-            None => list_dna_dirs(&self.cfg.holochain.data_root)?,
+            None => retrieve::list_dna_databases(&self.cfg.holochain.data_root)?,
         };
 
+        let key = crate::tier1_key(self.cfg).await?;
         let mut out: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
         for d in &dnas {
-            let mut key = crate::tier1_key(self.cfg)?;
-            let mut dht = match retrieve::open_holochain_database(
+            // A failure goes in the file, not just the log. This artifact is
+            // what an operator copies off the host to answer "was this agent
+            // warranted?"; an empty array would answer "no".
+            let dht = match retrieve::open_dht_database(
                 &self.cfg.holochain.data_root,
-                &retrieve::DbKind::Dht,
                 d,
-                key.as_mut(),
-            ) {
+                key.as_ref(),
+            )
+            .await
+            {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::warn!(dna = %d, error = %e, "skipping dna in warrants export");
+                    tracing::warn!(dna = %d, error = %e, "could not open dna for warrants export");
+                    out.insert(d.to_string(), export_error(&e));
                     continue;
                 }
             };
-            let records = retrieve::get_warrants(&mut dht).unwrap_or_default();
+            let records = retrieve::get_warrants(&dht).await;
+            dht.close().await;
+            let records = match records {
+                Ok(records) => records,
+                Err(e) => {
+                    tracing::warn!(dna = %d, error = %e, "get_warrants failed");
+                    out.insert(d.to_string(), export_error(&e));
+                    continue;
+                }
+            };
             let pretty = <Vec<_> as HumanReadableDisplay>::as_human_readable_pretty(&records)
                 .map_err(|e| CollectorError::Other(format!("readable: {e}")))?;
             let value: serde_json::Value = serde_json::from_str(&pretty)?;
@@ -118,18 +123,16 @@ impl<'a> Exporter<'a> {
     }
 
     /// Dump every pending op (including bodies) for one DNA.
-    pub fn pending_ops(&self, dna: &holo_hash::DnaHash) -> Result<PathBuf> {
+    pub async fn pending_ops(&self, dna: &holo_hash::DnaHash) -> Result<PathBuf> {
         use unyt_watchtower_hc_store::readable::HumanReadableDisplay;
         use unyt_watchtower_hc_store::retrieve;
 
-        let mut key = crate::tier1_key(self.cfg)?;
-        let mut dht = retrieve::open_holochain_database(
-            &self.cfg.holochain.data_root,
-            &retrieve::DbKind::Dht,
-            dna,
-            key.as_mut(),
-        )?;
-        let records = retrieve::get_pending_ops(&mut dht)?;
+        let key = crate::tier1_key(self.cfg).await?;
+        let dht =
+            retrieve::open_dht_database(&self.cfg.holochain.data_root, dna, key.as_ref()).await?;
+        let records = retrieve::get_pending_ops(&dht).await;
+        dht.close().await;
+        let records = records?;
         let path = self
             .cfg
             .exports_dir
@@ -146,12 +149,9 @@ impl<'a> Exporter<'a> {
     pub fn simplify_state_dump(&self, input: &Path) -> Result<PathBuf> {
         let dump = unyt_watchtower_chain_doc::read_dump(input)
             .map_err(|e| CollectorError::Other(format!("read_dump: {e}")))?;
-        let simplified = unyt_watchtower_chain_doc::simplify_dump(
-            &dump,
-            input,
-            Utc::now().to_rfc3339(),
-        )
-        .map_err(|e| CollectorError::Other(format!("simplify_dump: {e}")))?;
+        let simplified =
+            unyt_watchtower_chain_doc::simplify_dump(&dump, input, Utc::now().to_rfc3339())
+                .map_err(|e| CollectorError::Other(format!("simplify_dump: {e}")))?;
         let path = self
             .cfg
             .exports_dir
@@ -215,41 +215,15 @@ impl<'a> Exporter<'a> {
     }
 }
 
+/// Record a per-DNA failure inside the export itself, so a reader cannot
+/// mistake "we could not look" for "there was nothing there".
+fn export_error(error: &dyn std::fmt::Display) -> serde_json::Value {
+    serde_json::json!({ "error": error.to_string() })
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct PruneReport {
     pub removed_age: u32,
     pub removed_size: u32,
     pub bytes_removed: u64,
-}
-
-/// Enumerate every DNA the conductor has a DHT database for. Filenames in
-/// `{data_root}/databases/dht/` are the DNA hash in Holochain's canonical
-/// `uhC0k…` form (see `open_holochain_database`).
-fn list_dna_dirs(data_root: &Path) -> Result<Vec<holo_hash::DnaHash>> {
-    use std::str::FromStr;
-
-    let dir = data_root.join("databases").join("dht");
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-    let mut out = Vec::new();
-    for entry in fs::read_dir(&dir)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        // SQLite sidecars (`-shm`, `-wal`) live next to the main DB.
-        if name.ends_with("-shm") || name.ends_with("-wal") {
-            continue;
-        }
-        match holo_hash::DnaHashB64::from_str(name) {
-            Ok(h) => out.push(h.into()),
-            Err(e) => {
-                tracing::debug!(file = %name, error = %e, "skipping non-DNA file in dht dir");
-            }
-        }
-    }
-    Ok(out)
 }

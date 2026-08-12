@@ -1,449 +1,117 @@
+//! The types the queries in [`super`] return.
+//!
+//! Row structs come from [`holochain_data::models::dht`] — the conductor's own
+//! definitions — and are projected here into the shapes the collector and the
+//! Tier-2 exporters consume.
+
 use crate::{HcOpsError, HcOpsResult};
-use diesel::backend::Backend;
-use diesel::deserialize::FromSql;
-use diesel::prelude::*;
-use diesel::serialize::{Output, ToSql};
-use diesel::sql_types::{SmallInt, Text};
-use diesel::{AsExpression, FromSqlRow};
-use holochain_zome_types::Entry;
+use holo_hash::{ActionHash, AgentPubKey, AnyLinkableHash, DhtOpHash, ExternalHash, HoloHashed};
+use holochain_data::models::dht::{ActionRow, LimboChainOpRow, WarrantRow};
+use holochain_integrity_types::prelude::{
+    Action, ActionData, ActionHeader, RecordValidity, Signature, SignedHashed,
+};
 use holochain_zome_types::prelude::{
-    AnyLinkableHash, BlockTargetId, BlockTargetReason, DhtOpHash, SignedAction, SignedWarrant,
-    Timestamp,
+    BlockTargetId, BlockTargetReason, ChainOpType, Entry, SignedActionHashed, SignedWarrant,
+    Timestamp, Warrant, WarrantProof,
 };
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
 
-pub enum DhtOp {
-    ChainOp(DbDhtOp),
-    WarrantOp(DbWarrant),
-}
-
-impl From<DbDhtOp> for DhtOp {
-    fn from(value: DbDhtOp) -> Self {
-        DhtOp::ChainOp(value)
-    }
-}
-
-impl From<DbWarrant> for DhtOp {
-    fn from(value: DbWarrant) -> Self {
-        DhtOp::WarrantOp(value)
-    }
-}
-
-#[derive(Debug, Queryable, Selectable)]
-#[diesel(table_name = crate::retrieve::schema::DhtOp)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct DbDhtOp {
-    pub hash: Vec<u8>,
-    pub typ: Option<DbOpType>,
-    pub basis_hash: Option<Vec<u8>>,
-    pub action_hash: Option<Vec<u8>>,
-    // DHT only
-    pub require_receipt: Option<bool>,
-    pub storage_center_loc: Option<i32>,
-    pub authored_timestamp: Option<i64>,
-    pub op_order: String,
-    pub validation_status: Option<ValidationStatus>,
-    pub when_integrated: Option<i64>,
-    // Authored only
-    pub withhold_publish: Option<bool>,
-    // Authored only
-    pub receipts_complete: Option<bool>,
-    // Authored only
-    pub last_publish_time: Option<i64>,
-    // DHT only
-    pub validation_stage: Option<ValidationStage>,
-    // DHT only
-    pub num_validation_attempts: Option<i32>,
-    // DHT only
-    pub last_validation_attempt: Option<i64>,
-    // DHT only
-    pub when_sys_validated: Option<i32>,
-    // DHT only
-    pub when_app_validated: Option<i32>,
-    // DHT only
-    pub when_stored: Option<i32>,
-    // DHT only
-    pub serialized_size: Option<i32>,
-    // DHT only
-    pub transfer_source: Option<Vec<u8>>,
-    // DHT only
-    pub transfer_method: Option<i32>,
-    // DHT only
-    pub transfer_time: Option<i64>,
-}
-
-#[derive(Debug, Copy, Clone, AsExpression, FromSqlRow, Serialize, Deserialize)]
-#[diesel(sql_type = Text)]
-pub enum DbOpType {
-    StoreRecord,
-    StoreEntry,
-    RegisterAgentActivity,
-    RegisterUpdatedContent,
-    RegisterUpdatedRecord,
-    RegisterDeletedBy,
-    RegisterDeletedEntryAction,
-    RegisterAddLink,
-    RegisterRemoveLink,
-    ChainIntegrityWarrant,
-}
-
-impl<DB: Backend> FromSql<Text, DB> for DbOpType
-where
-    String: FromSql<Text, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let v = String::from_sql(bytes)?;
-        Ok(match v.as_str() {
-            "StoreRecord" => DbOpType::StoreRecord,
-            "StoreEntry" => DbOpType::StoreEntry,
-            "RegisterAgentActivity" => DbOpType::RegisterAgentActivity,
-            "RegisterUpdatedContent" => DbOpType::RegisterUpdatedContent,
-            "RegisterUpdatedRecord" => DbOpType::RegisterUpdatedRecord,
-            "RegisterDeletedBy" => DbOpType::RegisterDeletedBy,
-            "RegisterDeletedEntryAction" => DbOpType::RegisterDeletedEntryAction,
-            "RegisterAddLink" => DbOpType::RegisterAddLink,
-            "RegisterRemoveLink" => DbOpType::RegisterRemoveLink,
-            "ChainIntegrityWarrant" => DbOpType::ChainIntegrityWarrant,
-            typ => return Err(format!("Unknown DhtOpType: {typ}").into()),
-        })
-    }
-}
-
-#[derive(Debug, Copy, Clone, AsExpression, FromSqlRow, Serialize, Deserialize)]
-#[diesel(sql_type = SmallInt)]
-pub enum ValidationStage {
-    /// Is awaiting to be system validated
-    Pending,
-    /// Is waiting for dependencies so the op can proceed to system validation
-    AwaitingSysDeps,
-    /// Is awaiting to be app validated
-    SysValidated,
-    /// Is waiting for dependencies so the op can proceed to app validation
-    AwaitingAppDeps,
-    /// Is awaiting to be integrated.
-    AwaitingIntegration,
-}
-
-impl<DB: Backend> FromSql<SmallInt, DB> for ValidationStage
-where
-    i16: FromSql<SmallInt, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let v = i16::from_sql(bytes)?;
-        Ok(match v {
-            0 => ValidationStage::Pending,
-            1 => ValidationStage::AwaitingSysDeps,
-            2 => ValidationStage::SysValidated,
-            3 => ValidationStage::AwaitingAppDeps,
-            4 => ValidationStage::AwaitingIntegration,
-            stage => return Err(format!("Unknown ValidationStage: {stage}").into()),
-        })
-    }
-}
-
-#[derive(Debug, Copy, Clone, AsExpression, FromSqlRow, Serialize, Deserialize)]
-#[diesel(sql_type = SmallInt)]
+/// Validation outcome of a DHT op.
+///
+/// 0.7 records only `Accepted` / `Rejected` on the integrated tables and marks
+/// give-up separately, as `abandoned_at` on the limbo tables; both are folded
+/// into this one enum so the Tier-1 vocabulary the dashboard reads is unchanged.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ValidationStatus {
-    /// All dependencies were found and validation passed
+    /// Validation passed.
     Valid,
-    /// Item was rejected by validation
+    /// Validation rejected the op.
     Rejected,
-    /// Holochain has decided to never again attempt validation,
-    /// commonly due to missing validation dependencies remaining missing for "too long"
+    /// Validation was given up on, commonly because dependencies stayed missing.
     Abandoned,
 }
 
-impl<DB: Backend> FromSql<SmallInt, DB> for ValidationStatus
-where
-    i16: FromSql<SmallInt, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let v = i16::from_sql(bytes)?;
-        Ok(match v {
-            0 => ValidationStatus::Valid,
-            1 => ValidationStatus::Rejected,
-            2 => ValidationStatus::Abandoned,
-            status => return Err(format!("Unknown ValidationStatus: {status}").into()),
-        })
-    }
-}
-
-impl<DB: Backend> ToSql<SmallInt, DB> for ValidationStatus
-where
-    i16: ToSql<SmallInt, DB>,
-{
-    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, DB>) -> diesel::serialize::Result {
-        match self {
-            ValidationStatus::Valid => 0i16.to_sql(out),
-            ValidationStatus::Rejected => 1i16.to_sql(out),
-            ValidationStatus::Abandoned => 2i16.to_sql(out),
+impl ValidationStatus {
+    /// Decode a `validation_status` / `record_validity` column.
+    pub fn from_db(value: i64) -> HcOpsResult<Self> {
+        match RecordValidity::try_from(value) {
+            Ok(RecordValidity::Accepted) => Ok(Self::Valid),
+            Ok(RecordValidity::Rejected) => Ok(Self::Rejected),
+            Err(other) => Err(HcOpsError::Other(
+                format!("unknown validation status {other} in database").into(),
+            )),
         }
     }
 }
 
+/// Op-level metadata for a chain op still in validation limbo.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct DhtMeta {
+pub struct LimboMeta {
     pub require_receipt: bool,
-    pub validation_stage: Option<ValidationStage>,
-    pub num_validation_attempts: Option<u32>,
+    pub when_received: Timestamp,
+    pub sys_validation_attempts: u32,
+    pub app_validation_attempts: u32,
     pub last_validation_attempt: Option<Timestamp>,
-    /// `when_integrated` from the `DhtOp` row, if the op has been integrated
-    /// into the DHT. Microsecond Holochain timestamp.
-    pub when_integrated: Option<Timestamp>,
+    pub serialized_size: u32,
 }
 
+/// A chain op that has not been integrated yet.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CacheMeta {}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AuthoredMeta {
-    withhold_publish: bool,
-    receipts_complete: bool,
-    last_publish_time: Option<Timestamp>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ChainOp<Meta = ()>
-where
-    Meta: Debug,
-{
+pub struct LimboOp {
     pub hash: DhtOpHash,
-    pub typ: DbOpType,
+    pub typ: ChainOpType,
     pub basis_hash: AnyLinkableHash,
-    pub action_hash: Vec<u8>,
+    pub action_hash: ActionHash,
     pub storage_center_loc: u32,
     pub authored_timestamp: Timestamp,
+    /// The outcome so far, or `None` while it is undecided. Only a *terminal*
+    /// outcome is reported: passing sys validation still leaves an op waiting
+    /// on app validation, so it stays `None` until app validation concludes.
     pub validation_status: Option<ValidationStatus>,
-    pub meta: Meta,
+    pub meta: LimboMeta,
 }
 
-impl TryFrom<DbDhtOp> for ChainOp {
-    type Error = HcOpsError;
-
-    fn try_from(value: DbDhtOp) -> HcOpsResult<Self> {
-        Ok(ChainOp {
-            hash: DhtOpHash::try_from_raw_39(value.hash)?,
-            typ: value
-                .typ
-                .ok_or_else(|| HcOpsError::Other("No DhtOpType stored".into()))?,
-            basis_hash: AnyLinkableHash::try_from_raw_39(
-                value
-                    .basis_hash
-                    .ok_or_else(|| HcOpsError::Other("No basis hash stored".into()))?,
-            )?,
-            action_hash: value
-                .action_hash
-                .ok_or_else(|| HcOpsError::Other("No action hash stored".into()))?,
-            storage_center_loc: value
-                .storage_center_loc
-                .ok_or_else(|| HcOpsError::Other("Missing storage center location".into()))?
-                as u32,
-            authored_timestamp: value
-                .authored_timestamp
-                .ok_or_else(|| HcOpsError::Other("Missing authored timestamp".into()))
-                .map(Timestamp)?,
-            validation_status: value.validation_status,
-            meta: (),
-        })
-    }
+/// Op-level metadata for an integrated warrant.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WarrantOp {
+    pub hash: DhtOpHash,
+    pub storage_center_loc: u32,
+    /// When the warrant was authored (from the warrant content, not the op).
+    pub authored_timestamp: Timestamp,
+    pub when_received: Timestamp,
+    pub when_integrated: Option<Timestamp>,
+    pub validation_status: Option<ValidationStatus>,
+    pub serialized_size: u32,
 }
 
-impl TryFrom<DbDhtOp> for ChainOp<DhtMeta> {
-    type Error = HcOpsError;
-
-    fn try_from(value: DbDhtOp) -> HcOpsResult<Self> {
-        let dht_meta = DhtMeta {
-            // TODO It's a boolean, why is it nullable?
-            require_receipt: value.require_receipt.unwrap_or_default(),
-            validation_stage: value.validation_stage,
-            num_validation_attempts: value.num_validation_attempts.map(|v| v as u32),
-            last_validation_attempt: value.last_validation_attempt.map(Timestamp),
-            when_integrated: value.when_integrated.map(Timestamp),
-        };
-
-        let common: ChainOp = value.try_into()?;
-
-        Ok(ChainOp {
-            hash: common.hash,
-            typ: common.typ,
-            basis_hash: common.basis_hash,
-            action_hash: common.action_hash,
-            storage_center_loc: common.storage_center_loc,
-            authored_timestamp: common.authored_timestamp,
-            validation_status: common.validation_status,
-            meta: dht_meta,
-        })
-    }
+/// An integrated warrant: the op metadata plus the signed warrant it carries.
+pub struct WarrantRecord {
+    pub dht_op: WarrantOp,
+    pub warrant: SignedWarrant,
 }
 
-impl TryFrom<DbDhtOp> for ChainOp<CacheMeta> {
-    type Error = HcOpsError;
-
-    fn try_from(value: DbDhtOp) -> HcOpsResult<Self> {
-        let cache_meta = CacheMeta {};
-
-        let common: ChainOp = value.try_into()?;
-
-        Ok(ChainOp {
-            hash: common.hash,
-            typ: common.typ,
-            basis_hash: common.basis_hash,
-            action_hash: common.action_hash,
-            storage_center_loc: common.storage_center_loc,
-            authored_timestamp: common.authored_timestamp,
-            validation_status: common.validation_status,
-            meta: cache_meta,
-        })
-    }
+/// One record on an agent's chain, as reconstructed from the DHT database.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainRecord {
+    pub action: SignedActionHashed,
+    pub validation_status: ValidationStatus,
+    pub entry: Option<Entry>,
 }
 
-impl TryFrom<DbDhtOp> for ChainOp<AuthoredMeta> {
-    type Error = HcOpsError;
-
-    fn try_from(value: DbDhtOp) -> HcOpsResult<Self> {
-        let authored_meta = AuthoredMeta {
-            withhold_publish: value.withhold_publish.unwrap_or_default(),
-            receipts_complete: value.receipts_complete.unwrap_or_default(),
-            last_publish_time: value.last_publish_time.map(Timestamp),
-        };
-
-        let common: ChainOp = value.try_into()?;
-
-        Ok(ChainOp {
-            hash: common.hash,
-            typ: common.typ,
-            basis_hash: common.basis_hash,
-            action_hash: common.action_hash,
-            storage_center_loc: common.storage_center_loc,
-            authored_timestamp: common.authored_timestamp,
-            validation_status: common.validation_status,
-            meta: authored_meta,
-        })
-    }
+/// A not-yet-integrated op together with the action and entry it carries.
+pub struct Record {
+    pub dht_op: LimboOp,
+    pub action: SignedActionHashed,
+    pub entry: Option<Entry>,
 }
 
-#[derive(Debug, Queryable, Selectable)]
-#[diesel(table_name = crate::retrieve::schema::Entry)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-#[allow(dead_code)]
-pub struct DbEntry {
-    hash: Vec<u8>,
-    blob: Vec<u8>,
-    tag: Option<String>,
-    grantor: Option<Vec<u8>>,
-    cap_secret: Option<Vec<u8>>,
-    functions: Option<Vec<u8>>,
-    access_type: Option<String>,
-    access_secret: Option<Vec<u8>>,
-    access_assignees: Option<Vec<u8>>,
-}
-
-impl TryFrom<DbEntry> for Entry {
-    type Error = HcOpsError;
-
-    fn try_from(value: DbEntry) -> HcOpsResult<Self> {
-        Ok(holochain_serialized_bytes::decode(value.blob.as_slice())?)
-    }
-}
-
-#[derive(Debug, Queryable, Selectable)]
-#[diesel(table_name = crate::retrieve::schema::Action)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-#[allow(dead_code)]
-pub struct DbAction {
-    hash: Vec<u8>,
-    typ: String,
-    seq: i32,
-    author: Vec<u8>,
-    blob: Vec<u8>,
-    prev_hash: Option<Vec<u8>>,
-    entry_hash: Option<Vec<u8>>,
-    entry_type: Option<String>,
-    private_entry: Option<bool>,
-    original_entry_hash: Option<Vec<u8>>,
-    original_action_hash: Option<Vec<u8>>,
-    deletes_entry_hash: Option<Vec<u8>>,
-    deletes_action_hash: Option<Vec<u8>>,
-    base_hash: Option<Vec<u8>>,
-    zome_index: Option<i32>,
-    link_type: Option<i32>,
-    tag: Option<Vec<u8>>,
-    create_link_hash: Option<Vec<u8>>,
-    membrane_proof: Option<Vec<u8>>,
-    prev_dna_hash: Option<Vec<u8>>,
-}
-
-impl TryFrom<DbAction> for SignedAction {
-    type Error = HcOpsError;
-
-    fn try_from(value: DbAction) -> HcOpsResult<Self> {
-        Ok(holochain_serialized_bytes::decode(value.blob.as_slice())?)
-    }
-}
-
-#[derive(Debug, Queryable, Selectable)]
-#[diesel(table_name = crate::retrieve::schema::Warrant)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct DbWarrant {
-    pub hash: Vec<u8>,
-    pub author: Vec<u8>,
-    pub timestamp: i64,
-    pub warrantee: Vec<u8>,
-    pub typ: String,
-    pub blob: Vec<u8>,
-}
-
-impl TryFrom<DbWarrant> for SignedWarrant {
-    type Error = HcOpsError;
-
-    fn try_from(value: DbWarrant) -> Result<Self, Self::Error> {
-        Ok(holochain_serialized_bytes::decode(value.blob.as_slice())?)
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Queryable, Selectable)]
-#[diesel(table_name = crate::retrieve::schema::SliceHash)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+/// A K2 slice hash covering one arc and time slice.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct SliceHash {
-    pub arc_start: i32,
-    pub arc_end: i32,
+    pub arc_start: i64,
+    pub arc_end: i64,
     pub slice_index: i64,
     pub hash: Vec<u8>,
-}
-
-#[derive(Debug, Queryable, Selectable)]
-#[diesel(table_name = crate::retrieve::schema::BlockSpan)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct DbBlockSpan {
-    pub id: i64,
-    pub target_id: Vec<u8>,
-    pub target_reason: Vec<u8>,
-    pub start_us: i64,
-    pub end_us: i64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct BlockRecord {
-    pub id: i64,
-    pub target: BlockTargetId,
-    pub reason: BlockTargetReason,
-    pub start: Timestamp,
-    pub end: Timestamp,
-}
-
-impl TryFrom<DbBlockSpan> for BlockRecord {
-    type Error = HcOpsError;
-
-    fn try_from(value: DbBlockSpan) -> Result<Self, Self::Error> {
-        Ok(BlockRecord {
-            id: value.id,
-            target: holochain_serialized_bytes::decode(&value.target_id)?,
-            reason: holochain_serialized_bytes::decode(&value.target_reason)?,
-            start: Timestamp(value.start_us),
-            end: Timestamp(value.end_us),
-        })
-    }
 }
 
 impl PartialOrd for SliceHash {
@@ -454,10 +122,166 @@ impl PartialOrd for SliceHash {
 
 impl Ord for SliceHash {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if self.slice_index == other.slice_index {
-            return self.arc_start.cmp(&other.arc_start);
-        }
+        self.slice_index
+            .cmp(&other.slice_index)
+            .then_with(|| self.arc_start.cmp(&other.arc_start))
+    }
+}
 
-        self.slice_index.cmp(&other.slice_index)
+/// One block span from the conductor database.
+#[derive(Debug, Serialize)]
+pub struct BlockRecord {
+    pub id: i64,
+    pub target: BlockTargetId,
+    pub reason: BlockTargetReason,
+    pub start: Timestamp,
+    pub end: Timestamp,
+}
+
+/// Raw `BlockSpan` row.
+#[derive(Debug, sqlx::FromRow)]
+pub(crate) struct BlockSpanRow {
+    pub id: i64,
+    pub target_id: Vec<u8>,
+    pub target_reason: Vec<u8>,
+    pub start_us: i64,
+    pub end_us: i64,
+}
+
+impl TryFrom<BlockSpanRow> for BlockRecord {
+    type Error = HcOpsError;
+
+    fn try_from(value: BlockSpanRow) -> HcOpsResult<Self> {
+        Ok(BlockRecord {
+            id: value.id,
+            target: holochain_serialized_bytes::decode(&value.target_id)?,
+            reason: holochain_serialized_bytes::decode(&value.target_reason)?,
+            start: Timestamp(value.start_us),
+            end: Timestamp(value.end_us),
+        })
+    }
+}
+
+/// Rebuild the signed, hashed action a row was written from.
+///
+/// Mirrors `holochain_data`'s own `row_to_signed_action_hashed`, which is
+/// crate-private. Note the stored hashes are the bare 36 bytes: 0.7 drops the
+/// 3-byte hash-type prefix on disk and re-attaches it on read.
+pub(crate) fn action_from_row(row: ActionRow) -> HcOpsResult<SignedActionHashed> {
+    let data: ActionData = holochain_serialized_bytes::decode(&row.action_data)?;
+    let action = Action {
+        header: ActionHeader {
+            author: AgentPubKey::from_raw_36(row.author),
+            timestamp: Timestamp::from_micros(row.timestamp),
+            action_seq: row.seq as u32,
+            prev_action: row.prev_hash.map(ActionHash::from_raw_36),
+        },
+        data,
+    };
+    let signature: [u8; 64] = row.signature.as_slice().try_into().map_err(|_| {
+        HcOpsError::Other(
+            format!(
+                "signature column has {} bytes, expected 64",
+                row.signature.len()
+            )
+            .into(),
+        )
+    })?;
+    let hashed = HoloHashed::with_pre_hashed(action, ActionHash::from_raw_36(row.hash));
+    Ok(SignedHashed::with_presigned(hashed, Signature(signature)))
+}
+
+/// Rebuild a `basis_hash` column.
+///
+/// The column holds the 36 type-stripped bytes — the DHT routes on location
+/// alone, so the hash-type wrapper is not persisted. It is reattached as an
+/// `External` hash, the same reconstruction the conductor's publish path makes.
+fn basis_from_raw_36(bytes: Vec<u8>) -> AnyLinkableHash {
+    ExternalHash::from_raw_36(bytes).into()
+}
+
+/// Decode the `op_type` discriminant a `ChainOp` / `LimboChainOp` row carries.
+fn op_type_from_db(value: i64) -> HcOpsResult<ChainOpType> {
+    ChainOpType::try_from(value)
+        .map_err(|v| HcOpsError::Other(format!("unknown chain op type {v} in database").into()))
+}
+
+impl TryFrom<(LimboChainOpRow, i64)> for LimboOp {
+    type Error = HcOpsError;
+
+    fn try_from((row, authored_timestamp): (LimboChainOpRow, i64)) -> HcOpsResult<Self> {
+        // Only terminal outcomes are reported. An `abandoned_at` stamp wins:
+        // the op will never integrate. Otherwise app validation decides, since
+        // a sys-validated op is still queued for it — reporting a sys pass as
+        // `Valid` would give a half-validated op the same label as an
+        // integrated one. A sys *rejection* is terminal, so it does count.
+        let validation_status = if row.abandoned_at.is_some() {
+            Some(ValidationStatus::Abandoned)
+        } else if let Some(app) = row.app_validation_status {
+            Some(ValidationStatus::from_db(app)?)
+        } else {
+            match row.sys_validation_status.map(ValidationStatus::from_db) {
+                Some(Ok(ValidationStatus::Rejected)) => Some(ValidationStatus::Rejected),
+                Some(Err(e)) => return Err(e),
+                _ => None,
+            }
+        };
+
+        Ok(LimboOp {
+            hash: DhtOpHash::from_raw_36(row.hash),
+            typ: op_type_from_db(row.op_type)?,
+            basis_hash: basis_from_raw_36(row.basis_hash),
+            action_hash: ActionHash::from_raw_36(row.action_hash),
+            storage_center_loc: row.storage_center_loc as u32,
+            authored_timestamp: Timestamp(authored_timestamp),
+            validation_status,
+            meta: LimboMeta {
+                require_receipt: row.require_receipt != 0,
+                when_received: Timestamp(row.when_received),
+                sys_validation_attempts: row.sys_validation_attempts as u32,
+                app_validation_attempts: row.app_validation_attempts as u32,
+                last_validation_attempt: row.last_validation_attempt.map(Timestamp),
+                serialized_size: row.serialized_size as u32,
+            },
+        })
+    }
+}
+
+impl TryFrom<(WarrantRow, i64)> for WarrantRecord {
+    type Error = HcOpsError;
+
+    /// `(joined warrant row, `WarrantOp.validation_status`)` — the status is not
+    /// part of `WarrantRow`, so callers select it alongside.
+    fn try_from((row, validation_status): (WarrantRow, i64)) -> HcOpsResult<Self> {
+        let proof: WarrantProof = holochain_serialized_bytes::decode(&row.proof)?;
+        let signature: [u8; 64] = row.signature.as_slice().try_into().map_err(|_| {
+            HcOpsError::Other(
+                format!(
+                    "warrant signature column has {} bytes, expected 64",
+                    row.signature.len()
+                )
+                .into(),
+            )
+        })?;
+
+        let warrant = Warrant::new(
+            proof,
+            AgentPubKey::from_raw_36(row.author),
+            Timestamp(row.timestamp),
+            AgentPubKey::from_raw_36(row.warrantee),
+        );
+
+        Ok(WarrantRecord {
+            dht_op: WarrantOp {
+                hash: DhtOpHash::from_raw_36(row.hash),
+                storage_center_loc: row.storage_center_loc as u32,
+                authored_timestamp: Timestamp(row.timestamp),
+                when_received: Timestamp(row.when_received),
+                when_integrated: Some(Timestamp(row.when_integrated)),
+                validation_status: Some(ValidationStatus::from_db(validation_status)?),
+                serialized_size: row.serialized_size as u32,
+            },
+            warrant: SignedWarrant::new(warrant, Signature(signature)),
+        })
     }
 }

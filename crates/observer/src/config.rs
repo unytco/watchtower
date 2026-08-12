@@ -111,7 +111,6 @@ impl ObserverConfig {
     pub fn read_secret(&self) -> Result<Vec<u8>> {
         let raw = std::fs::read_to_string(&self.ingest.secret_file)?;
         let trimmed = raw.trim();
-        hex::decode(trimmed)
-            .map_err(|e| anyhow::anyhow!("ingest secret is not valid hex: {e}"))
+        hex::decode(trimmed).map_err(|e| anyhow::anyhow!("ingest secret is not valid hex: {e}"))
     }
 }

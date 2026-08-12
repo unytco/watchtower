@@ -1,15 +1,15 @@
 use crate::config::ObserverConfig;
 use anyhow::{Context, Result};
 use chrono::Utc;
-use ham::{compute_delay_ms, install_shutdown_handler, is_connection_error, BackoffConfig};
+use ham::{BackoffConfig, compute_delay_ms, install_shutdown_handler, is_connection_error};
 use holochain_client::{AdminWebsocket, WebsocketConfig};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::select;
-use unyt_watchtower_collector::{collect_node_snapshot, Exporter};
+use unyt_watchtower_collector::{Exporter, collect_node_snapshot};
 use unyt_watchtower_core::{
-    body_digest_hex, canonical_string, headers, sign, IngestPayload, SelfHealth, SCHEMA_VERSION,
+    IngestPayload, SCHEMA_VERSION, SelfHealth, body_digest_hex, canonical_string, headers, sign,
 };
 
 const BINARY_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -85,9 +85,7 @@ async fn connect_admin_with_retry(
                 let transient = is_connection_error(&err);
                 attempt += 1;
                 if attempt >= MAX_CONNECT_ATTEMPTS_PER_CYCLE || !transient {
-                    return Err(err.context(format!(
-                        "giving up after {attempt} attempt(s)"
-                    )));
+                    return Err(err.context(format!("giving up after {attempt} attempt(s)")));
                 }
                 let delay_ms = compute_delay_ms(attempt, &backoff);
                 tracing::warn!(
@@ -123,21 +121,20 @@ async fn run_cycle(
     .unwrap_or_else(|join_err| {
         tracing::error!(error = %join_err, "janitor task panicked");
         Ok(Default::default())
-    })
-    {
+    }) {
         tracing::warn!(error = %e, "export dir janitor failed");
     }
 
     let admin = connect_admin_with_retry(cfg.holochain.admin_port, ws_cfg).await?;
 
-    let node = collect_node_snapshot(&collector_cfg, &admin)
+    let collected = collect_node_snapshot(&collector_cfg, &admin)
         .await
         .context("collect_node_snapshot")?;
 
     let self_health = SelfHealth {
         uptime_s: started_at.elapsed().as_secs(),
         last_collection_ms: t0.elapsed().as_millis() as u64,
-        n_errors_this_cycle: 0,
+        n_errors_this_cycle: collected.degraded_reads,
         binary_version: BINARY_VERSION.to_string(),
     };
 
@@ -146,7 +143,7 @@ async fn run_cycle(
         observer_id: cfg.observer_id.clone(),
         collected_at: Utc::now().to_rfc3339(),
         self_health,
-        node,
+        node: collected.node,
     };
 
     post(cfg, &payload).await?;

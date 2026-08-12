@@ -1,28 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Copyright (C) 2025-2026 Unyt contributors. Portions derived from
-// ThetaSinner/hc-ops (GPL-3.0); see retrieve.rs, ops.rs, readable.rs for
-// upstream copyright notices.
+// ThetaSinner/hc-ops (GPL-3.0); see readable.rs for the upstream copyright
+// notice.
 
-//! Vendored data layer from `ThetaSinner/hc-ops` (GPL-3.0). The
-//! current upstream rev and the sync procedure are documented in
-//! [`watchtower/AGENTS.md`](../../AGENTS.md) under "Syncing `hc_store`
-//! from upstream `hc-ops`"; the per-file `Vendored from … @ <sha>`
-//! markers at the top of `retrieve.rs`, `ops.rs`, and `readable.rs` are
-//! the source of truth for the rev.
+//! Read-only data layer over a Holochain conductor's SQLite databases.
 //!
-//! Anything that talks directly to Holochain SQLite or the admin websocket
-//! lives here. The collector builds on top of this.
+//! Everything that talks directly to conductor storage or the admin websocket
+//! lives here; the collector builds Tier-1 summaries on top.
 //!
-//! Keep this crate free of DTOs that belong in `crates/core`; this crate
-//! returns Holochain-native types (`ChainOp<DhtMeta>`, `ChainRecord`, …) and
+//! The three facts that must agree with the conductor byte-for-byte — the
+//! schema, the database file names, and the SQLCipher key derivation — are
+//! taken from [`holochain_data`], the crate the conductor itself writes with.
+//! Nothing here restates them; see [`retrieve`] for how the connection is
+//! opened read-only without touching the conductor's migrations.
+//!
+//! Keep this crate free of DTOs that belong in `crates/core`; it returns
+//! Holochain-native types (`ChainRecord`, `Record`, `WarrantRecord`, …) and
 //! the collector maps them to Tier-1 summaries.
-//!
-//! Watchtower-specific additions live in [`extensions`] and as
-//! `retrieve::list_authored_identities` — preserve those when syncing.
 
 pub mod extensions;
-pub mod ops;
 pub mod readable;
 pub mod retrieve;
 
@@ -35,7 +32,7 @@ pub enum HcOpsError {
     IO(#[from] std::io::Error),
 
     #[error("Database error: {0}")]
-    Database(#[from] diesel::result::Error),
+    Database(#[from] sqlx::Error),
 
     #[error("JSON error: {0}")]
     JSON(#[from] serde_json::Error),
