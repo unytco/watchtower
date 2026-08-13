@@ -238,6 +238,12 @@ export interface BridgeService {
   reconnects_ok_total: number;
   pressure_active: number;
   pressure_consecutive: number;
+  // The unclassified-failure streak, twin of the pressure pair above.
+  // Optional so a dashboard built against a not-yet-migrated worker is
+  // type-honest; `computeStatus` treats absent as "no streak", the same
+  // reading as the column's 0 default.
+  unclassified_active?: number;
+  unclassified_consecutive?: number;
   stage_ejections_total: number;
   is_stuck: number;
   last_error: string | null;

@@ -96,6 +96,12 @@ export const bridgeHelp: Record<BridgeField, ReactNode> = {
         intentionally throttling after repeated pressure signals.
       </div>
       <div>
+        <span className="mono">unclassified cooldown</span> — cycles are
+        failing with an error the orchestrator recognises as none of its known
+        classes. Throttled the same way as pressure, but the cause is unknown —
+        check <span className="mono">last error</span>.
+      </div>
+      <div>
         <span className="mono">failing cycles</span> — 2 or more bridge cycles
         in a row have failed.
       </div>

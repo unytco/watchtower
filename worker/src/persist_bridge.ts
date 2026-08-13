@@ -18,10 +18,11 @@ export async function persistBridge(env: Env, payload: BridgePayload): Promise<v
          observer_id, dna_b64, last_seen_iso, uptime_s, binary_version,
          last_cycle_at_iso, last_cycle_ms,
          consecutive_failed_cycles, reconnect_failures_total, reconnects_ok_total,
-         pressure_active, pressure_consecutive, stage_ejections_total,
+         pressure_active, pressure_consecutive,
+         unclassified_active, unclassified_consecutive, stage_ejections_total,
          is_stuck, last_error, last_error_at_iso, updated_at
        )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(observer_id) DO UPDATE SET
          dna_b64 = excluded.dna_b64,
          last_seen_iso = excluded.last_seen_iso,
@@ -34,6 +35,8 @@ export async function persistBridge(env: Env, payload: BridgePayload): Promise<v
          reconnects_ok_total = excluded.reconnects_ok_total,
          pressure_active = excluded.pressure_active,
          pressure_consecutive = excluded.pressure_consecutive,
+         unclassified_active = excluded.unclassified_active,
+         unclassified_consecutive = excluded.unclassified_consecutive,
          stage_ejections_total = excluded.stage_ejections_total,
          is_stuck = excluded.is_stuck,
          last_error = excluded.last_error,
@@ -52,6 +55,8 @@ export async function persistBridge(env: Env, payload: BridgePayload): Promise<v
       self_health.reconnects_ok_total,
       self_health.pressure_active ? 1 : 0,
       self_health.pressure_consecutive,
+      self_health.unclassified_active ? 1 : 0,
+      self_health.unclassified_consecutive ?? 0,
       self_health.stage_ejections_total,
       self_health.is_stuck ? 1 : 0,
       self_health.last_error ?? null,

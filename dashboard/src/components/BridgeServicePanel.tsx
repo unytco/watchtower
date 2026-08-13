@@ -192,11 +192,14 @@ function ServiceRow({
   );
 }
 
-type Status = "healthy" | "pressure" | "failing" | "stuck";
+type Status = "healthy" | "pressure" | "unclassified" | "failing" | "stuck";
 
 function computeStatus(s: BridgeService): Status {
   if (s.is_stuck) return "stuck";
   if (s.pressure_active) return "pressure";
+  // The orchestrator sets at most one cooldown class per cycle, so the order
+  // between these two only decides a tie that cannot occur in practice.
+  if (s.unclassified_active) return "unclassified";
   if (s.consecutive_failed_cycles >= 2) return "failing";
   return "healthy";
 }
@@ -205,12 +208,14 @@ function StatusBadge({ status }: { status: Status }) {
   const styles: Record<Status, string> = {
     healthy: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
     pressure: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    unclassified: "bg-amber-500/10 text-amber-400 border-amber-500/30",
     failing: "bg-amber-500/10 text-amber-400 border-amber-500/30",
     stuck: "bg-red-500/10 text-red-400 border-red-500/30",
   };
   const labels: Record<Status, string> = {
     healthy: "healthy",
     pressure: "pressure cooldown",
+    unclassified: "unclassified cooldown",
     failing: "failing cycles",
     stuck: "stuck",
   };

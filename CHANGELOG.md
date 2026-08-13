@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- D1 migration `0006_bridge_unclassified_streak.sql`: `bridge_services` gains `unclassified_active` and `unclassified_consecutive` (INTEGER, default 0). Apply on redeploy.
+- dashboard API contract: `GET /api/dnas/:dna/bridge` service rows gain `unclassified_active` / `unclassified_consecutive` (the bridge's unclassified-error streak, twin of the pressure pair), and the bridge status badge gains an `unclassified cooldown` state. Bridge ingest stays on schema v1 — a reporter predating the fields omits them and reads as "no streak", so worker and bridge need not be redeployed in lockstep. No alert rule consumes either streak pair yet; both are dashboard + API surfaces today.
 - upgrade Holochain to 0.7 — `crates/hc_store` is rewritten off its vendored diesel schema onto `holochain_data` + sqlx; the data-layer API is now async.
 - **dashboard API contract:** `WarrantSummary.proof_summary.chain_op_type` now carries 0.7's op-type names (`CreateRecord` / `CreateEntry` / …), replacing 0.6's `StoreRecord` / `Register*`. No D1 migration; a 0.6→0.7 window shows both vocabularies at once.
 - `lag_p50_ms` / `lag_p99_ms` are computed as `ChainOp.when_integrated − Action.timestamp`, and the percentile now uses nearest rank (the old index under-reported the tail).
