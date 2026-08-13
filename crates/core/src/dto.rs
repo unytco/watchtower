@@ -47,8 +47,12 @@ pub struct ConductorSnapshot {
     pub disabled_apps: u32,
     /// Number of unique nonces seen in the conductor DB and how many of
     /// those saw a replay attempt (same nonce used twice within the window).
+    /// `nonce_duplicate_count` is `None` when the nonce read degraded this
+    /// cycle (B107): the CLI renders "—", so a failed read is distinct from a
+    /// genuine zero. `Some(0)` is a real zero. `nonce_count` carries no such
+    /// ambiguity and stays a bare count (collapses to 0 on a degraded read).
     pub nonce_count: u32,
-    pub nonce_duplicate_count: u32,
+    pub nonce_duplicate_count: Option<u32>,
 }
 
 /// One DNA's Tier-1 bundle. Must fit into [`crate::MAX_DNA_SNAPSHOT_BYTES`].
@@ -69,8 +73,13 @@ pub struct DnaSnapshot {
     pub cap_grants: Vec<CapGrantSummary>,
     pub derived_metrics: DerivedMetrics,
 
-    pub pending_ops_count: u32,
-    pub integrated_ops_count: u32,
+    /// Pending / integrated op counts. Each is `None` when its read degraded
+    /// this cycle (B107): the CLI — their only reader — renders "—", so a
+    /// failed read is distinct from a DNA that genuinely sits at zero.
+    /// `Some(0)` is a real zero. Not persisted to D1 and not shown on the
+    /// dashboard.
+    pub pending_ops_count: Option<u32>,
+    pub integrated_ops_count: Option<u32>,
 }
 
 /// Zome list + network_seed + properties hash. Properties_json is ALREADY

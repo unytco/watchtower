@@ -36,7 +36,10 @@ export interface ConductorSnapshot {
   paused_apps: number;
   disabled_apps: number;
   nonce_count: number;
-  nonce_duplicate_count: number;
+  // Null when the nonce read degraded that cycle (B107): CLI-only, so the
+  // observer posts null and the CLI renders "—". The Worker neither persists
+  // nor displays it.
+  nonce_duplicate_count: number | null;
 }
 
 export interface DnaSnapshot {
@@ -56,8 +59,11 @@ export interface DnaSnapshot {
   validation_coverage: ValidationCoverageRow[];
   cap_grants: CapGrantSummary[];
   derived_metrics: DerivedMetrics;
-  pending_ops_count: number;
-  integrated_ops_count: number;
+  // Null when the read degraded that cycle (B107): CLI-only, so the observer
+  // posts null and the CLI renders "—". The Worker neither persists nor
+  // displays them.
+  pending_ops_count: number | null;
+  integrated_ops_count: number | null;
 }
 
 export interface AgentSummary {
@@ -150,9 +156,10 @@ export interface CapGrantSummary {
 
 // Each metric is null when the observer's read for it degraded that cycle
 // (B107): the D1 timeseries stores NULL and the dashboard renders "—", distinct
-// from a real zero. `pending_ops_count` / `integrated_ops_count` stay non-null
-// (the observer posts their real count, collapsing to 0 only on a degraded read
-// — B107 remainder, since their only reader is the CLI).
+// from a real zero. The CLI-only counts (`pending_ops_count` /
+// `integrated_ops_count` / `nonce_duplicate_count`) are nullable for the same
+// reason, but the Worker neither persists nor displays them — only the CLI
+// reads them, rendering "—".
 export interface DerivedMetrics {
   integration_rate: number | null;
   lag_p50_ms: number | null;

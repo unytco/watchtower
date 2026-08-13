@@ -69,13 +69,11 @@ pub async fn collect_node_snapshot(
     let conductor =
         retrieve::open_conductor_database(&cfg.holochain.data_root, key.as_ref()).await?;
 
-    // A failed read here reports `nonce_duplicate_count: 0`, which is the
-    // "no replay attempts" value — hence the count, not just the log.
-    let nonce = warn_on_err(
+    let (nonce_count, nonce_duplicate_count) = nonce_fields(warn_on_err_opt(
         extensions::nonce_stats(&conductor).await,
         "nonce_stats",
         &degraded,
-    );
+    ));
 
     let conductor_snap = ConductorSnapshot {
         holochain_version: None,
@@ -89,8 +87,8 @@ pub async fn collect_node_snapshot(
         disabled_apps: count_status(&apps, |s| {
             matches!(s, holochain_types::app::AppStatus::Disabled(_))
         }),
-        nonce_count: nonce.unique_count as u32,
-        nonce_duplicate_count: nonce.duplicate_count as u32,
+        nonce_count,
+        nonce_duplicate_count,
     };
 
     let blocks = warn_on_err(collect_blocks(&conductor).await, "get_blocks", &degraded);
@@ -332,23 +330,21 @@ async fn collect_from_dht(
     })
     .collect();
 
-    // Lag and the pending-op count are load-bearing health signals whose read
-    // can degrade. The `DerivedMetrics` fields are `Option`, so a degraded read
-    // posts `null` ("unknown") — which the dashboard renders distinctly from a
-    // real zero (B107). `pending_ops_count` / `integrated_ops_count` below stay
-    // `u32` (their only consumer is the CLI, tracked as the B107 remainder), so
-    // `pending` collapses to `0` there via `unwrap_or`.
-    let pending = warn_on_err_opt(
+    // Lag and the op counts are load-bearing health signals whose read can
+    // degrade. Each degrades to `None` ("unknown"), never a fake zero (B107):
+    // the `DerivedMetrics` `None`s reach the dashboard as `null`, and
+    // `pending_ops_count` / `integrated_ops_count` — whose only reader is the
+    // CLI — reach it as "—".
+    let pending = op_count_u32(warn_on_err_opt(
         extensions::count_pending_ops(dht).await,
         "count_pending_ops",
         degraded,
-    )
-    .map(|c| c as u32);
-    let integrated = warn_on_err(
+    ));
+    let integrated = op_count_u32(warn_on_err_opt(
         extensions::count_integrated_ops(dht).await,
         "count_integrated_ops",
         degraded,
-    ) as u32;
+    ));
 
     let lag = warn_on_err_opt(
         extensions::integration_lag(dht, cfg.lag_window_s).await,
@@ -379,10 +375,7 @@ async fn collect_from_dht(
         validation_coverage,
         cap_grants,
         derived_metrics,
-        // Group-A degraded fields still collapse to 0 (the CLI is their only
-        // reader and isn't Option-aware yet — the B107 remainder). Their sibling
-        // `pending_backlog` above already carries the honest `None`.
-        pending_ops_count: pending.unwrap_or(0),
+        pending_ops_count: pending,
         integrated_ops_count: integrated,
     };
 
@@ -423,6 +416,26 @@ fn warn_on_err<T: Default, E: std::fmt::Display>(
     degraded: &DegradedReads,
 ) -> T {
     warn_on_err_opt(result, what, degraded).unwrap_or_default()
+}
+
+/// Split an optional nonce read into its two `ConductorSnapshot` fields,
+/// `(nonce_count, nonce_duplicate_count)`. A degraded read (`None`) yields
+/// `(0, None)`: `nonce_count` has no misleading zero so it collapses to 0,
+/// while `nonce_duplicate_count` stays `None` so the CLI renders "—" instead of
+/// a fake "no replay attempts" (B107). The asymmetry is deliberate — only the
+/// CLI-only counts are `Option`.
+fn nonce_fields(nonce: Option<extensions::NonceStats>) -> (u32, Option<u32>) {
+    match nonce {
+        Some(n) => (n.unique_count as u32, Some(n.duplicate_count as u32)),
+        None => (0, None),
+    }
+}
+
+/// Narrow a degraded-aware op count to the DTO's `u32`, keeping `None` (a
+/// degraded read) as the "unknown" marker — it must never collapse to a fake
+/// `0` (B107).
+fn op_count_u32(raw: Option<i64>) -> Option<u32> {
+    raw.map(|c| c as u32)
 }
 
 /// Trim snapshot fields in a fixed order until the JSON fits under the
@@ -849,8 +862,8 @@ mod tests {
             validation_coverage: Vec::new(),
             cap_grants: Vec::new(),
             derived_metrics: DerivedMetrics::default(),
-            pending_ops_count: 0,
-            integrated_ops_count: 0,
+            pending_ops_count: Some(0),
+            integrated_ops_count: Some(0),
         }
     }
 
@@ -868,6 +881,33 @@ mod tests {
         let degraded_read = warn_on_err_opt(Err::<u32, String>("boom".into()), "probe", &degraded);
         assert_eq!(degraded_read, None);
         assert_eq!(degraded.count(), 1);
+    }
+
+    #[test]
+    fn nonce_fields_keeps_degraded_duplicate_count_unknown() {
+        // A real read: both counts flow through; the duplicate count is `Some`
+        // even when it is a genuine zero.
+        assert_eq!(
+            nonce_fields(Some(extensions::NonceStats {
+                unique_count: 7,
+                duplicate_count: 0,
+            })),
+            (7, Some(0))
+        );
+
+        // A degraded read: `nonce_count` collapses to 0 (no ambiguous zero) but
+        // the duplicate count stays `None`, so the CLI shows "—" not a fake 0.
+        // This pins the deliberate count-vs-duplicate asymmetry (B107).
+        assert_eq!(nonce_fields(None), (0, None));
+    }
+
+    #[test]
+    fn op_count_u32_keeps_degraded_read_unknown() {
+        assert_eq!(op_count_u32(Some(5)), Some(5));
+        // A real zero stays `Some(0)`; only a degraded read (`None`) is unknown,
+        // so a future edit that collapsed the degraded branch to a fake 0 trips.
+        assert_eq!(op_count_u32(Some(0)), Some(0));
+        assert_eq!(op_count_u32(None), None);
     }
 
     #[test]

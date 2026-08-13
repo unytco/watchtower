@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pending_ops_count` / `integrated_ops_count` are read from 0.7's split tables (`LimboChainOp` + `LimboWarrantOp`, `ChainOp` + `WarrantOp`); warrant ops stay counted.
 - `SelfHealth.n_errors_this_cycle` now reports degraded reads (was hard-coded `0`), and a failed `migration_status_by_author` drops its DNA from the snapshot rather than reporting every agent un-migrated.
 - Report degraded observer reads as `null` instead of `0` (apply D1 migration 0005 on redeploy).
+- Report degraded CLI count reads (`pending_ops_count` / `integrated_ops_count` / `nonce_duplicate_count`) as `—` (unknown) instead of `0`; CLI-only, so no D1 or dashboard change.
 - pin Rust 1.95.0 (was 1.93.1): `sqlx` 0.9 requires ≥ 1.94, and 1.95 is what holonix `main-0.7` already provides.
 - Clear the Rust 1.95 clippy warnings in the vendored `chain_doc` crate.
 - Clear the remaining Rust 1.95 clippy warnings across the workspace.
