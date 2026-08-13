@@ -666,8 +666,10 @@ async fn validation_coverage_returns_the_least_witnessed_ops_first() {
     let db = new_dht_db(tmp.path(), None).await;
     let author = agent(0x11);
 
-    // Receipts have a foreign key onto `ChainOp`, so the ops must exist first.
-    for (i, byte) in [0x01u8, 0x02, 0x03].iter().enumerate() {
+    // Five integrated ops. Receipts have a foreign key onto `ChainOp`, so the
+    // ops must exist first. ops 0x84 and 0x85 get NO receipts — the zero-receipt
+    // "under-validated" case that must surface, and could not before B108.
+    for (i, byte) in [0x01u8, 0x02, 0x03, 0x04, 0x05].iter().enumerate() {
         insert_integrated(
             &db,
             &signed_action(
@@ -684,7 +686,7 @@ async fn validation_coverage_returns_the_least_witnessed_ops_first() {
         .await;
     }
 
-    // op 0x81 gets one receipt, 0x82 two, 0x83 three.
+    // op 0x81 gets one receipt, 0x82 two, 0x83 three; 0x84 and 0x85 none.
     let mut receipt = 0xc0u8;
     for (op_byte, count) in [(0x81u8, 1), (0x82, 2), (0x83, 3)] {
         for _ in 0..count {
@@ -701,14 +703,21 @@ async fn validation_coverage_returns_the_least_witnessed_ops_first() {
     }
 
     let read = open_for_read(tmp.path()).await;
-    let rows = extensions::validation_coverage_bottom_n(&read, 2)
+    let rows = extensions::validation_coverage_bottom_n(&read, 3)
         .await
         .unwrap();
 
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].receipt_count, 1);
-    assert_eq!(rows[0].op_hash, op_hash(0x81).get_raw_36().to_vec());
-    assert_eq!(rows[1].receipt_count, 2);
+    assert_eq!(rows.len(), 3);
+    // The zero-receipt ops are the worst-covered and come first — the whole point
+    // of driving the query from `ChainOp` rather than `ValidationReceipt` (B108).
+    // The two zero-receipt ops tie on count and break by op_hash ascending
+    // (0x84 < 0x85), so bottom-N is deterministic.
+    assert_eq!(rows[0].receipt_count, 0);
+    assert_eq!(rows[0].op_hash, op_hash(0x84).get_raw_36().to_vec());
+    assert_eq!(rows[1].receipt_count, 0);
+    assert_eq!(rows[1].op_hash, op_hash(0x85).get_raw_36().to_vec());
+    assert_eq!(rows[2].receipt_count, 1);
+    assert_eq!(rows[2].op_hash, op_hash(0x81).get_raw_36().to_vec());
 }
 
 #[tokio::test]

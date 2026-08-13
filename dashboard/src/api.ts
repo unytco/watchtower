@@ -103,12 +103,17 @@ export type WarrantProofSummary =
       action_author_b64: string;
       action_hash_b64: string;
       chain_op_type: string;
+      // Holochain 0.7's human-readable rejection reason. Optional: pre-0.7
+      // proof rows (and a 0.6→0.7 window) omit it (B110).
+      reason?: string;
     }
   | {
       kind: "ChainFork";
       chain_author_b64: string;
       action_a_hash_b64: string;
       action_b_hash_b64: string;
+      // Chain position the fork occurred at. Optional for the same reason.
+      seq?: number;
     }
   | { kind: "Other"; description: string };
 
@@ -131,10 +136,12 @@ export interface MetricPoint {
   observer_id: string;
   dna_b64: string;
   bucket_hour_iso: string;
-  integration_rate: number;
-  lag_p50_ms: number;
-  lag_p99_ms: number;
-  pending_backlog: number;
+  // null when the observer's read degraded that cycle (B107): rendered as "—",
+  // and drawn as a gap in the sparkline, rather than a misleading 0.
+  integration_rate: number | null;
+  lag_p50_ms: number | null;
+  lag_p99_ms: number | null;
+  pending_backlog: number | null;
 }
 
 export function useObservers() {

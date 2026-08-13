@@ -94,12 +94,17 @@ export type WarrantProofSummary =
       action_author_b64: string;
       action_hash_b64: string;
       chain_op_type: string;
+      // Holochain 0.7's human-readable "why this op is invalid". Optional:
+      // pre-0.7 proof rows (and a 0.6→0.7 window) omit it (B110).
+      reason?: string;
     }
   | {
       kind: "ChainFork";
       chain_author_b64: string;
       action_a_hash_b64: string;
       action_b_hash_b64: string;
+      // Chain position the fork occurred at. Optional for the same reason.
+      seq?: number;
     }
   | { kind: "Other"; description: string };
 
@@ -143,11 +148,16 @@ export interface CapGrantSummary {
   access_type: string;
 }
 
+// Each metric is null when the observer's read for it degraded that cycle
+// (B107): the D1 timeseries stores NULL and the dashboard renders "—", distinct
+// from a real zero. `pending_ops_count` / `integrated_ops_count` stay non-null
+// (the observer posts their real count, collapsing to 0 only on a degraded read
+// — B107 remainder, since their only reader is the CLI).
 export interface DerivedMetrics {
-  integration_rate: number;
-  lag_p50_ms: number;
-  lag_p99_ms: number;
-  pending_backlog: number;
+  integration_rate: number | null;
+  lag_p50_ms: number | null;
+  lag_p99_ms: number | null;
+  pending_backlog: number | null;
 }
 
 export interface AppSummary {

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - per-DNA migration counters: the observer derives `chain_closed` / `opening_summary_present` per reported agent, and each DNA view shows "agents closed" / "agents opened" tiles plus the flags in the per-agent rows.
+- Surface Holochain 0.7 warrant `reason` and fork `seq` on the dashboard.
 
 ### Changed
 
@@ -18,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `lag_p50_ms` / `lag_p99_ms` are computed as `ChainOp.when_integrated − Action.timestamp`, and the percentile now uses nearest rank (the old index under-reported the tail).
 - `pending_ops_count` / `integrated_ops_count` are read from 0.7's split tables (`LimboChainOp` + `LimboWarrantOp`, `ChainOp` + `WarrantOp`); warrant ops stay counted.
 - `SelfHealth.n_errors_this_cycle` now reports degraded reads (was hard-coded `0`), and a failed `migration_status_by_author` drops its DNA from the snapshot rather than reporting every agent un-migrated.
+- Report a degraded observer read as `null` instead of a fake `0` for the derived metrics; the dashboard renders "—".
+- Apply D1 migration `0005_nullable_derived_metrics.sql` on redeploy, before the new observer.
 - pin Rust 1.95.0 (was 1.93.1): `sqlx` 0.9 requires ≥ 1.94, and 1.95 is what holonix `main-0.7` already provides.
 - clear Rust 1.95 clippy `collapsible_if` and `let_and_return` in the vendored `chain_doc` crate (behavior-preserving; kept byte-identical with `hc-chain-doc`).
 - clear the remaining Rust 1.95 clippy `collapsible_if` lints in `hc_store`, `collector`, and `cli` via behavior-preserving let-chain collapses, so `cargo clippy --workspace -- -D warnings` is green.
@@ -30,3 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - the per-`(dna, agent)` authored databases and the per-DNA cache database, which 0.7 folded into `dht-<dna>.db`; `DbKind`, `open_holochain_database` and `list_authored_identities` go with them.
 - `hc_store::ops` (the `AdminWebsocketExt` helpers) and the bulk `get_all_*` / slice readers, all inherited from hc-ops and called by nothing in this workspace.
+
+### Fixed
+
+- Log and count each per-DNA snapshot budget-trim instead of dropping rows silently.
+- Surface zero-receipt ops in validation coverage — drive it from `ChainOp`, not the receipts table.

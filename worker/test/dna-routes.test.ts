@@ -113,6 +113,7 @@ async function seed() {
         action_author_b64: AGENT_2,
         action_hash_b64: "action-1",
         chain_op_type: "CreateEntry",
+        reason: "entry failed app validation",
       }),
     ),
     DB.prepare(
@@ -216,6 +217,8 @@ describe("DNA-scoped routes", () => {
     const proof = JSON.parse(enriched.proof_summary_json as string);
     expect(proof.kind).toBe("InvalidChainOp");
     expect(proof.chain_op_type).toBe("CreateEntry");
+    // 0.7's human-readable rejection reason round-trips to the dashboard (B110).
+    expect(proof.reason).toBe("entry failed app validation");
 
     // OBS_Y simulates an older observer; the worker still returns the row
     // with the enrichment fields as NULL.
@@ -237,5 +240,56 @@ describe("DNA-scoped routes", () => {
     expect(body.changed.dnas_seen).toBeTypeOf("number");
     expect(body.changed.slice_hashes).toBeTypeOf("number");
     expect(body.changed.chain_summaries).toBeTypeOf("number");
+  });
+
+  it("round-trips a 0.7 fork seq and tolerates a pre-0.7 proof missing reason", async () => {
+    const now = new Date().toISOString();
+    const DNA_P = "dna-proof";
+    const insert = (op: string, type: string, proof: object) =>
+      env.DB.prepare(
+        `INSERT INTO warrants (observer_id, dna_b64, op_hash_b64, warrant_type, author_b64,
+               target_b64, ts_iso, first_seen_at, updated_at,
+               authored_ts_iso, integrated_ts_iso, validation_status, signature_b64,
+               proof_summary_json)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ).bind(
+        OBS_X, DNA_P, op, type, AGENT_1, AGENT_2, now, now, now, now, now, "Valid", "sig",
+        JSON.stringify(proof),
+      );
+    await env.DB.batch([
+      insert("op-fork", "ChainFork", {
+        kind: "ChainFork",
+        chain_author_b64: AGENT_1,
+        action_a_hash_b64: "a",
+        action_b_hash_b64: "b",
+        seq: 9,
+      }),
+      // A pre-0.7 InvalidChainOp row with no `reason` key at all.
+      insert("op-legacy", "InvalidChainOp", {
+        kind: "InvalidChainOp",
+        action_author_b64: AGENT_2,
+        action_hash_b64: "c",
+        chain_op_type: "CreateEntry",
+      }),
+    ]);
+
+    const { warrants } = await (
+      await SELF.fetch(`http://test/api/warrants?dna=${DNA_P}`)
+    ).json<{ warrants: Record<string, unknown>[] }>();
+
+    const forkProof = JSON.parse(
+      warrants.find((w) => w.op_hash_b64 === "op-fork")!.proof_summary_json as string,
+    );
+    expect(forkProof.kind).toBe("ChainFork");
+    // 0.7's fork position round-trips to the dashboard (B110).
+    expect(forkProof.seq).toBe(9);
+
+    const legacyProof = JSON.parse(
+      warrants.find((w) => w.op_hash_b64 === "op-legacy")!.proof_summary_json as string,
+    );
+    expect(legacyProof.kind).toBe("InvalidChainOp");
+    // A pre-0.7 row has no reason; it round-trips as absent, which the
+    // dashboard's `proof.reason && …` guard renders as no reason line (B110).
+    expect(legacyProof.reason).toBeUndefined();
   });
 });

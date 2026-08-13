@@ -336,10 +336,12 @@ function pushDna(
       observer_id,
       d.dna_b64,
       bucket,
-      d.derived_metrics.integration_rate,
-      d.derived_metrics.lag_p50_ms,
-      d.derived_metrics.lag_p99_ms,
-      d.derived_metrics.pending_backlog,
+      // `?? null` so a degraded read (B107) stores SQL NULL rather than tripping
+      // on `undefined`; the columns are nullable as of migration 0005.
+      d.derived_metrics.integration_rate ?? null,
+      d.derived_metrics.lag_p50_ms ?? null,
+      d.derived_metrics.lag_p99_ms ?? null,
+      d.derived_metrics.pending_backlog ?? null,
     ),
   );
 }

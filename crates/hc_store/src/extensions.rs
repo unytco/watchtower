@@ -21,17 +21,25 @@ pub struct ValidationCoverageRow {
     pub receipt_count: i64,
 }
 
-/// Count validation receipts per op hash and return the bottom N ops by
-/// receipt count. Useful for "which ops are under-validated?".
+/// Count validation receipts per op and return the bottom N ops by receipt
+/// count. Answers "which ops are under-validated?".
+///
+/// Driven from `ChainOp` (every integrated op) `LEFT JOIN ValidationReceipt`,
+/// not a `GROUP BY` over the receipts table: an op with **zero** receipts — the
+/// literal worst case, and what this function exists to surface — has no row in
+/// `ValidationReceipt`, so a receipts-only grouping can never see it and the
+/// floor of the list would always be `receipt_count: 1` (B108). `COUNT(r.op_hash)`
+/// counts matched receipts, so an unmatched left row correctly reports 0.
 pub async fn validation_coverage_bottom_n(
     dht: &HolochainDb,
     n: i64,
 ) -> HcOpsResult<Vec<ValidationCoverageRow>> {
     let rows: Vec<(Vec<u8>, i64)> = sqlx::query_as(
-        "SELECT op_hash, COUNT(*) AS receipt_count
-           FROM ValidationReceipt
-          GROUP BY op_hash
-          ORDER BY receipt_count ASC, op_hash ASC
+        "SELECT o.hash, COUNT(r.op_hash) AS receipt_count
+           FROM ChainOp o
+           LEFT JOIN ValidationReceipt r ON r.op_hash = o.hash
+          GROUP BY o.hash
+          ORDER BY receipt_count ASC, o.hash ASC
           LIMIT ?",
     )
     .bind(n)

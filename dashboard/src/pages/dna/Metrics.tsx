@@ -76,9 +76,14 @@ function MetricRow({
     .sort((a, b) => a.bucket_hour_iso.localeCompare(b.bucket_hour_iso))
     .map((r) => ({
       bucket_hour_iso: r.bucket_hour_iso,
-      value: Number(r[field] ?? 0),
+      // Keep a degraded bucket as null so the sparkline gaps rather than dipping
+      // to a fake 0 (B107).
+      value: r[field],
     }));
-  const last = data[data.length - 1]?.value ?? 0;
+  // A null latest bucket is "unknown": NaN makes formatMetric render "—",
+  // distinct from a real 0 which reads as "0 ops/s" / "0 ms".
+  const lastRaw = data[data.length - 1]?.value;
+  const last = lastRaw == null ? NaN : Number(lastRaw);
   return (
     <div className="flex items-center gap-3 mb-2">
       <div className="w-36 text-xs text-muted flex items-center gap-1.5">

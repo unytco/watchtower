@@ -208,14 +208,17 @@ CREATE TABLE IF NOT EXISTS chain_summaries (
 -- ------------------------------------------------------------------
 -- Timeseries (hourly, retained ~30 days)
 -- ------------------------------------------------------------------
+-- The four metric columns are nullable (0005_nullable_derived_metrics.sql): a
+-- degraded observer read stores NULL ("unknown"), which the dashboard renders
+-- as "—" distinct from a real 0 (B107).
 CREATE TABLE IF NOT EXISTS derived_metrics_ts (
   observer_id           TEXT NOT NULL,
   dna_b64               TEXT NOT NULL,
   bucket_hour_iso       TEXT NOT NULL,
-  integration_rate      REAL NOT NULL,
-  lag_p50_ms            INTEGER NOT NULL,
-  lag_p99_ms            INTEGER NOT NULL,
-  pending_backlog       INTEGER NOT NULL,
+  integration_rate      REAL,
+  lag_p50_ms            INTEGER,
+  lag_p99_ms            INTEGER,
+  pending_backlog       INTEGER,
   PRIMARY KEY (observer_id, dna_b64, bucket_hour_iso)
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_bucket ON derived_metrics_ts (bucket_hour_iso);
