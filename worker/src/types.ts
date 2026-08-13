@@ -199,6 +199,13 @@ export interface BridgeSelfHealth {
   reconnects_ok_total: number;
   pressure_active: boolean;
   pressure_consecutive: number;
+  // The unclassified-failure streak (B111) joined the reporter after bridge
+  // schema v1 shipped. Optional because a bridge that predates it omits both
+  // fields entirely; the ingest path coalesces them to the column defaults
+  // rather than bumping the schema version, which would 409 every reporter
+  // that has not been redeployed yet.
+  unclassified_active?: boolean;
+  unclassified_consecutive?: number;
   stage_ejections_total: number;
   is_stuck: boolean;
   last_error: string | null;

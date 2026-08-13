@@ -195,7 +195,8 @@ routes.get("/dnas/:dna/bridge", async (c) => {
     `SELECT observer_id, dna_b64, last_seen_iso, uptime_s, binary_version,
             last_cycle_at_iso, last_cycle_ms,
             consecutive_failed_cycles, reconnect_failures_total, reconnects_ok_total,
-            pressure_active, pressure_consecutive, stage_ejections_total,
+            pressure_active, pressure_consecutive,
+            unclassified_active, unclassified_consecutive, stage_ejections_total,
             is_stuck, last_error, last_error_at_iso, updated_at
        FROM bridge_services
       WHERE dna_b64 = ?
