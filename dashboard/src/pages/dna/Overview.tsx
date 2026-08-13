@@ -125,14 +125,18 @@ function SparkRow({
   rows,
   field,
 }: {
-  rows: Array<{ bucket_hour_iso: string } & Record<MetricField, number>>;
+  rows: Array<{ bucket_hour_iso: string } & Record<MetricField, number | null>>;
   field: MetricField;
 }) {
   const data = rows.map((r) => ({
     bucket_hour_iso: r.bucket_hour_iso,
-    value: Number(r[field] ?? 0),
+    // Keep a degraded bucket as null so the sparkline gaps rather than dipping
+    // to a fake 0 (B107).
+    value: r[field],
   }));
-  const last = data[data.length - 1]?.value ?? 0;
+  // A null latest bucket is "unknown": NaN makes formatMetric render "—".
+  const lastRaw = data[data.length - 1]?.value;
+  const last = lastRaw == null ? NaN : Number(lastRaw);
   return (
     <div className="flex items-center gap-3">
       <div className="w-36 text-xs text-muted flex items-center gap-1.5">

@@ -157,11 +157,11 @@ impl HumanReadable for AppInfo {
                         if let Some(value) = cell.get_mut("value") {
                             replace_field(value, "cell_id", transform_cell_id)?;
                         }
-                    } else if cell_type == "cloned" {
-                        if let Some(value) = cell.get_mut("value") {
-                            replace_field(value, "cell_id", transform_cell_id)?;
-                            replace_field(value, "original_dna_hash", transform_dna_hash)?
-                        }
+                    } else if cell_type == "cloned"
+                        && let Some(value) = cell.get_mut("value")
+                    {
+                        replace_field(value, "cell_id", transform_cell_id)?;
+                        replace_field(value, "original_dna_hash", transform_dna_hash)?
                     }
                 }
             }
@@ -602,10 +602,9 @@ fn transform_block_target_id(
         .as_object_mut()
         .and_then(|o| o.get_mut("NodeDna"))
         .and_then(|v| v.as_array_mut())
+        && node_dna.len() == 2
     {
-        if node_dna.len() == 2 {
-            node_dna[1] = transform_dna_hash(&node_dna[1])?;
-        }
+        node_dna[1] = transform_dna_hash(&node_dna[1])?;
     }
 
     Ok(value)

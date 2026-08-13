@@ -11,7 +11,9 @@ import { formatMetric, type MetricField } from "../lib/metricHelp";
 
 export interface SparkPoint {
   bucket_hour_iso: string;
-  value: number;
+  // null draws a gap (a degraded/unknown bucket), not a dip to zero — recharts
+  // skips null points because `connectNulls` defaults to false (B107).
+  value: number | null;
 }
 
 export function Sparkline({
@@ -36,7 +38,11 @@ export function Sparkline({
           }}
           labelFormatter={(label) => formatBucketLocal(String(label))}
           formatter={(value: number) => {
-            const v = Number(value);
+            // recharts types this as a number, but a gap (degraded) bucket can
+            // arrive as null at runtime; render "—", never a fake 0 —
+            // Number(null) === 0 (B107).
+            const v: number | null = value;
+            if (v == null || !Number.isFinite(v)) return ["—", ""];
             return [field ? formatMetric(field, v) : v.toFixed(2), ""];
           }}
         />

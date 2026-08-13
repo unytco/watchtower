@@ -47,8 +47,12 @@ pub struct ConductorSnapshot {
     pub disabled_apps: u32,
     /// Number of unique nonces seen in the conductor DB and how many of
     /// those saw a replay attempt (same nonce used twice within the window).
+    /// `nonce_duplicate_count` is `None` when the nonce read degraded this
+    /// cycle (B107): the CLI renders "—", so a failed read is distinct from a
+    /// genuine zero. `Some(0)` is a real zero. `nonce_count` carries no such
+    /// ambiguity and stays a bare count (collapses to 0 on a degraded read).
     pub nonce_count: u32,
-    pub nonce_duplicate_count: u32,
+    pub nonce_duplicate_count: Option<u32>,
 }
 
 /// One DNA's Tier-1 bundle. Must fit into [`crate::MAX_DNA_SNAPSHOT_BYTES`].
@@ -69,8 +73,13 @@ pub struct DnaSnapshot {
     pub cap_grants: Vec<CapGrantSummary>,
     pub derived_metrics: DerivedMetrics,
 
-    pub pending_ops_count: u32,
-    pub integrated_ops_count: u32,
+    /// Pending / integrated op counts. Each is `None` when its read degraded
+    /// this cycle (B107): the CLI — their only reader — renders "—", so a
+    /// failed read is distinct from a DNA that genuinely sits at zero.
+    /// `Some(0)` is a real zero. Not persisted to D1 and not shown on the
+    /// dashboard.
+    pub pending_ops_count: Option<u32>,
+    pub integrated_ops_count: Option<u32>,
 }
 
 /// Zome list + network_seed + properties hash. Properties_json is ALREADY
@@ -145,18 +154,27 @@ pub struct WarrantSummary {
 #[serde(tag = "kind")]
 pub enum WarrantProofSummary {
     /// A single op authored on `action_author`'s chain that failed
-    /// validation when judged as `chain_op_type`.
+    /// validation when judged as `chain_op_type`. `reason` is Holochain 0.7's
+    /// human-readable explanation of why the op is invalid; `None` on a pre-0.7
+    /// proof row that predates the field (`#[serde(default)]`), which the 0.7
+    /// collector never emits.
     InvalidChainOp {
         action_author_b64: String,
         action_hash_b64: String,
         chain_op_type: String,
+        #[serde(default)]
+        reason: Option<String>,
     },
-    /// Two actions at the same chain seq prove `chain_author` forked
-    /// their chain.
+    /// Two actions at the same chain seq prove `chain_author` forked their
+    /// chain. `seq` is the chain position the fork occurred at; `None` on a
+    /// pre-0.7 proof row. It is `Option`, not a bare `u32`, so an absent `seq`
+    /// is never mistaken for a genuine fork at position 0.
     ChainFork {
         chain_author_b64: String,
         action_a_hash_b64: String,
         action_b_hash_b64: String,
+        #[serde(default)]
+        seq: Option<u32>,
     },
     /// Forward-compatibility fallback for warrant variants we don't
     /// know how to decode yet. `kind` carries the variant name.
@@ -211,14 +229,19 @@ pub struct CapGrantSummary {
     pub access_type: String,
 }
 
+/// Per-DNA derived health metrics. Each field is `None` when the read it
+/// derives from degraded this cycle (B107): the observer posts JSON `null`, the
+/// D1 timeseries stores NULL, and the dashboard renders "—", so a failed read
+/// is visually distinct from a DNA that genuinely sits at zero. `Some(0)` still
+/// means a real zero.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DerivedMetrics {
     /// ops integrated per second over the last bucket
-    pub integration_rate: f64,
+    pub integration_rate: Option<f64>,
     /// ms from authored_timestamp to when_integrated, p50
-    pub lag_p50_ms: i64,
-    pub lag_p99_ms: i64,
-    pub pending_backlog: u32,
+    pub lag_p50_ms: Option<i64>,
+    pub lag_p99_ms: Option<i64>,
+    pub pending_backlog: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -235,4 +258,51 @@ pub struct BlockSummary {
     pub reason: String,
     pub start_iso: String,
     pub end_iso: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pre-0.7 `proof_summary_json` row (the Worker persists the whole proof
+    /// as JSON) carries no `reason` / `seq`. `#[serde(default)]` + `Option` must
+    /// decode that to `None` — not a fake `""` / `0` a reader can't tell from a
+    /// genuine empty reason or a real fork at seq 0 (B110).
+    #[test]
+    fn warrant_proof_summary_decodes_pre_0_7_rows_without_reason_or_seq() {
+        let invalid: WarrantProofSummary = serde_json::from_str(
+            r#"{"kind":"InvalidChainOp","action_author_b64":"a","action_hash_b64":"b","chain_op_type":"CreateEntry"}"#,
+        )
+        .unwrap();
+        match invalid {
+            WarrantProofSummary::InvalidChainOp { reason, .. } => assert_eq!(reason, None),
+            other => panic!("expected InvalidChainOp, got {other:?}"),
+        }
+
+        let fork: WarrantProofSummary = serde_json::from_str(
+            r#"{"kind":"ChainFork","chain_author_b64":"a","action_a_hash_b64":"b","action_b_hash_b64":"c"}"#,
+        )
+        .unwrap();
+        match fork {
+            WarrantProofSummary::ChainFork { seq, .. } => assert_eq!(seq, None),
+            other => panic!("expected ChainFork, got {other:?}"),
+        }
+    }
+
+    /// `Some` serializes transparently — a bare value, not `{"Some":…}` — so the
+    /// wire format the dashboard parses is unchanged from the pre-`Option` field.
+    #[test]
+    fn warrant_proof_summary_serializes_present_fields_transparently() {
+        let json = serde_json::to_string(&WarrantProofSummary::ChainFork {
+            chain_author_b64: "a".into(),
+            action_a_hash_b64: "b".into(),
+            action_b_hash_b64: "c".into(),
+            seq: Some(7),
+        })
+        .unwrap();
+        assert!(
+            json.contains(r#""seq":7"#),
+            "seq must serialize as a bare number, got {json}"
+        );
+    }
 }

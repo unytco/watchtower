@@ -184,12 +184,12 @@ impl<'a> Exporter<'a> {
         let age_cutoff = std::time::Duration::from_secs(max_age_days * 24 * 60 * 60);
 
         for (meta, path) in &entries {
-            if let Ok(modified) = meta.modified() {
-                if now.duration_since(modified).unwrap_or_default() > age_cutoff {
-                    fs::remove_file(path)?;
-                    report.removed_age += 1;
-                    report.bytes_removed += meta.len();
-                }
+            if let Ok(modified) = meta.modified()
+                && now.duration_since(modified).unwrap_or_default() > age_cutoff
+            {
+                fs::remove_file(path)?;
+                report.removed_age += 1;
+                report.bytes_removed += meta.len();
             }
         }
 

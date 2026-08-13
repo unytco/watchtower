@@ -13,8 +13,8 @@ use crate::{CollectorConfig, CollectorError, Result};
 use unyt_watchtower_core::{
     AgentSummary, AppSummary, BlockSummary, CapGrantSummary, ChainLockRow, ChainSummary,
     ConductorSnapshot, DerivedMetrics, DnaDefinitionSummary, DnaSnapshot, MAX_DNA_SNAPSHOT_BYTES,
-    NodeSnapshot, ScheduledFunctionRow, SliceHashRow, ValidationCoverageRow, WarrantProofSummary,
-    WarrantSummary, check_dna_snapshot_budget, tag,
+    NodeSnapshot, ScheduledFunctionRow, SizeBudgetError, SliceHashRow, ValidationCoverageRow,
+    WarrantProofSummary, WarrantSummary, check_dna_snapshot_budget, tag,
 };
 use unyt_watchtower_hc_store::retrieve::{ValidationStatus, WarrantRecord};
 use unyt_watchtower_hc_store::{extensions, retrieve};
@@ -69,13 +69,11 @@ pub async fn collect_node_snapshot(
     let conductor =
         retrieve::open_conductor_database(&cfg.holochain.data_root, key.as_ref()).await?;
 
-    // A failed read here reports `nonce_duplicate_count: 0`, which is the
-    // "no replay attempts" value — hence the count, not just the log.
-    let nonce = warn_on_err(
+    let (nonce_count, nonce_duplicate_count) = nonce_fields(warn_on_err_opt(
         extensions::nonce_stats(&conductor).await,
         "nonce_stats",
         &degraded,
-    );
+    ));
 
     let conductor_snap = ConductorSnapshot {
         holochain_version: None,
@@ -89,8 +87,8 @@ pub async fn collect_node_snapshot(
         disabled_apps: count_status(&apps, |s| {
             matches!(s, holochain_types::app::AppStatus::Disabled(_))
         }),
-        nonce_count: nonce.unique_count as u32,
-        nonce_duplicate_count: nonce.duplicate_count as u32,
+        nonce_count,
+        nonce_duplicate_count,
     };
 
     let blocks = warn_on_err(collect_blocks(&conductor).await, "get_blocks", &degraded);
@@ -332,30 +330,31 @@ async fn collect_from_dht(
     })
     .collect();
 
-    // Op counters and lag are load-bearing health signals. A failed read still
-    // reports zero — the Tier-1 DTO has no "unknown" — so `warn_on_err` logs it
-    // loudly; the log is the only thing distinguishing a broken read from an
-    // idle node. Giving these fields an explicit unknown is B107.
-    let pending = warn_on_err(
+    // Lag and the op counts are load-bearing health signals whose read can
+    // degrade. Each degrades to `None` ("unknown"), never a fake zero (B107):
+    // the `DerivedMetrics` `None`s reach the dashboard as `null`, and
+    // `pending_ops_count` / `integrated_ops_count` — whose only reader is the
+    // CLI — reach it as "—".
+    let pending = op_count_u32(warn_on_err_opt(
         extensions::count_pending_ops(dht).await,
         "count_pending_ops",
         degraded,
-    ) as u32;
-    let integrated = warn_on_err(
+    ));
+    let integrated = op_count_u32(warn_on_err_opt(
         extensions::count_integrated_ops(dht).await,
         "count_integrated_ops",
         degraded,
-    ) as u32;
+    ));
 
-    let lag = warn_on_err(
+    let lag = warn_on_err_opt(
         extensions::integration_lag(dht, cfg.lag_window_s).await,
         "integration_lag",
         degraded,
     );
     let derived_metrics = DerivedMetrics {
-        integration_rate: lag.integration_rate,
-        lag_p50_ms: lag.p50_ms,
-        lag_p99_ms: lag.p99_ms,
+        integration_rate: lag.as_ref().map(|l| l.integration_rate),
+        lag_p50_ms: lag.as_ref().map(|l| l.p50_ms),
+        lag_p99_ms: lag.as_ref().map(|l| l.p99_ms),
         pending_backlog: pending,
     };
 
@@ -380,50 +379,83 @@ async fn collect_from_dht(
         integrated_ops_count: integrated,
     };
 
-    enforce_budget(&mut snap)?;
+    enforce_budget(&mut snap, degraded)?;
 
     Ok(snap)
 }
 
+/// Degrade one read that has no meaningful empty value — an op counter, a lag
+/// percentile — to an explicit `None`, never silently: a query that starts
+/// failing after a Holochain upgrade otherwise reads as a genuine zero. The
+/// caller posts `null`, which the dashboard renders distinctly (B107).
+fn warn_on_err_opt<T, E: std::fmt::Display>(
+    result: std::result::Result<T, E>,
+    what: &str,
+    degraded: &DegradedReads,
+) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(e) => {
+            degraded.record();
+            // Neutral wording: some callers degrade to `None` ("unknown"),
+            // others (via `warn_on_err`) to an empty collection — the query
+            // name identifies which, and the count is what alerts fire off.
+            tracing::warn!(error = %e, query = what, "read failed; degrading");
+            None
+        }
+    }
+}
+
 /// Degrade one optional read to its empty value, but never silently: a query
 /// that starts failing after a Holochain upgrade would otherwise look exactly
-/// like a node with nothing to report.
+/// like a node with nothing to report. For reads whose empty value is itself a
+/// misleading zero, use [`warn_on_err_opt`] instead.
 fn warn_on_err<T: Default, E: std::fmt::Display>(
     result: std::result::Result<T, E>,
     what: &str,
     degraded: &DegradedReads,
 ) -> T {
-    result.unwrap_or_else(|e| {
-        degraded.record();
-        tracing::warn!(error = %e, query = what, "read failed; reporting empty");
-        T::default()
-    })
+    warn_on_err_opt(result, what, degraded).unwrap_or_default()
+}
+
+/// Split an optional nonce read into its two `ConductorSnapshot` fields,
+/// `(nonce_count, nonce_duplicate_count)`. A degraded read (`None`) yields
+/// `(0, None)`: `nonce_count` has no misleading zero so it collapses to 0,
+/// while `nonce_duplicate_count` stays `None` so the CLI renders "—" instead of
+/// a fake "no replay attempts" (B107). The asymmetry is deliberate — only the
+/// CLI-only counts are `Option`.
+fn nonce_fields(nonce: Option<extensions::NonceStats>) -> (u32, Option<u32>) {
+    match nonce {
+        Some(n) => (n.unique_count as u32, Some(n.duplicate_count as u32)),
+        None => (0, None),
+    }
+}
+
+/// Narrow a degraded-aware op count to the DTO's `u32`, keeping `None` (a
+/// degraded read) as the "unknown" marker — it must never collapse to a fake
+/// `0` (B107).
+fn op_count_u32(raw: Option<i64>) -> Option<u32> {
+    raw.map(|c| c as u32)
 }
 
 /// Trim snapshot fields in a fixed order until the JSON fits under the
 /// per-DNA budget. Order reflects "smallest loss of information first".
 /// Warrants are higher-value than chain summaries / agents (they represent
 /// integrity violations and are usually small) so they are trimmed last.
-fn enforce_budget(snap: &mut DnaSnapshot) -> Result<()> {
+///
+/// Every trim is logged (`dna`, field, before/after) and counted as a degraded
+/// read, so a snapshot that silently shrank a busy DNA down to a small one is
+/// visible in the logs and the error count rather than passing unremarked
+/// (B107). A `Serialize` fault is not a size problem — trimming rows can never
+/// fix it — so it is surfaced immediately instead of triggering rounds of
+/// pointless row-shredding.
+fn enforce_budget(snap: &mut DnaSnapshot, degraded: &DegradedReads) -> Result<()> {
     for _ in 0..8 {
         match check_dna_snapshot_budget(snap) {
             Ok(_) => return Ok(()),
-            Err(_) => {
-                if !snap.slice_hashes.is_empty() {
-                    snap.slice_hashes.truncate(snap.slice_hashes.len() / 2);
-                } else if !snap.cap_grants.is_empty() {
-                    snap.cap_grants.truncate(snap.cap_grants.len() / 2);
-                } else if !snap.validation_coverage.is_empty() {
-                    snap.validation_coverage
-                        .truncate(snap.validation_coverage.len() / 2);
-                } else if !snap.chain_summaries.is_empty() {
-                    snap.chain_summaries
-                        .truncate(snap.chain_summaries.len() / 2);
-                } else if !snap.agents.is_empty() {
-                    snap.agents.truncate(snap.agents.len() / 2);
-                } else if !snap.warrants.is_empty() {
-                    snap.warrants.truncate(snap.warrants.len() / 2);
-                } else {
+            Err(e @ SizeBudgetError::Serialize(_)) => return Err(e.into()),
+            Err(SizeBudgetError::Exceeded { .. }) => {
+                if !trim_one_field(snap, degraded) {
                     break;
                 }
             }
@@ -440,6 +472,46 @@ fn enforce_budget(snap: &mut DnaSnapshot) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+/// Halve the highest-priority non-empty field, logging what was dropped and
+/// counting it as a degraded read. Returns `false` when nothing is left to
+/// trim (every trimmable field is already empty).
+fn trim_one_field(snap: &mut DnaSnapshot, degraded: &DegradedReads) -> bool {
+    // Clone `dna_b64` once so the field vectors below can be borrowed mutably
+    // while it is logged.
+    let dna = snap.dna_b64.clone();
+    trim_field(&dna, "slice_hashes", &mut snap.slice_hashes, degraded)
+        || trim_field(&dna, "cap_grants", &mut snap.cap_grants, degraded)
+        || trim_field(
+            &dna,
+            "validation_coverage",
+            &mut snap.validation_coverage,
+            degraded,
+        )
+        || trim_field(&dna, "chain_summaries", &mut snap.chain_summaries, degraded)
+        || trim_field(&dna, "agents", &mut snap.agents, degraded)
+        || trim_field(&dna, "warrants", &mut snap.warrants, degraded)
+}
+
+/// Halve one field's rows, logging `dna`/`field`/`before`/`after` and counting
+/// a degraded read. Returns whether anything was trimmed.
+fn trim_field<T>(dna: &str, field: &str, rows: &mut Vec<T>, degraded: &DegradedReads) -> bool {
+    if rows.is_empty() {
+        return false;
+    }
+    let before = rows.len();
+    let after = before / 2;
+    rows.truncate(after);
+    degraded.record();
+    tracing::warn!(
+        dna,
+        field,
+        before,
+        after,
+        "dna snapshot over budget; trimmed rows to fit"
+    );
+    true
 }
 
 /// Project a per-author migration row onto the two `AgentSummary` flags. An
@@ -540,28 +612,33 @@ fn decode_proof(proof: &WarrantProof) -> (String, WarrantProofSummary) {
                 action_author,
                 action: (action_hash, _sig),
                 chain_op_type,
-                // 0.7 also carries a human-readable `reason`; surfacing it would
-                // widen the ingest schema, so it stays out of this port.
-                reason: _,
+                // 0.7's human-readable "why this op is invalid" — surfaced so an
+                // operator sees the reason, not just that a warrant exists (B110).
+                reason,
             } => (
                 "InvalidChainOp".to_string(),
                 WarrantProofSummary::InvalidChainOp {
                     action_author_b64: tag::b64url(action_author.get_raw_39()),
                     action_hash_b64: tag::b64url(action_hash.get_raw_39()),
                     chain_op_type: format!("{chain_op_type:?}"),
+                    // Always `Some` from live 0.7 data; `None` is reserved for
+                    // pre-0.7 rows decoded elsewhere.
+                    reason: Some(reason.clone()),
                 },
             ),
             ChainIntegrityWarrant::ChainFork {
                 chain_author,
                 action_pair: ((a_hash, _a_sig), (b_hash, _b_sig)),
-                // 0.7 also carries the forking `seq`; see the note above.
-                seq: _,
+                // The chain position the fork occurred at — localises a fork
+                // instead of leaving two bare action hashes (B110).
+                seq,
             } => (
                 "ChainFork".to_string(),
                 WarrantProofSummary::ChainFork {
                     chain_author_b64: tag::b64url(chain_author.get_raw_39()),
                     action_a_hash_b64: tag::b64url(a_hash.get_raw_39()),
                     action_b_hash_b64: tag::b64url(b_hash.get_raw_39()),
+                    seq: Some(*seq),
                 },
             ),
         },
@@ -616,8 +693,11 @@ mod tests {
                 action_author_b64,
                 action_hash_b64,
                 chain_op_type,
+                reason,
             } => {
                 assert_eq!(chain_op_type, "CreateEntry");
+                // 0.7's human-readable rejection reason is surfaced, not dropped (B110).
+                assert_eq!(reason.as_deref(), Some("entry failed app validation"));
                 assert_eq!(action_author_b64, tag::b64url(agent(0xaa).get_raw_39()));
                 assert_eq!(action_hash_b64, tag::b64url(action(0xbb).get_raw_39()));
             }
@@ -639,11 +719,14 @@ mod tests {
                 chain_author_b64,
                 action_a_hash_b64,
                 action_b_hash_b64,
+                seq,
             } => {
                 assert_eq!(chain_author_b64, tag::b64url(agent(0x11).get_raw_39()));
                 assert_eq!(action_a_hash_b64, tag::b64url(action(0x22).get_raw_39()));
                 assert_eq!(action_b_hash_b64, tag::b64url(action(0x33).get_raw_39()));
                 assert_ne!(action_a_hash_b64, action_b_hash_b64);
+                // The forking chain position is surfaced, not dropped (B110).
+                assert_eq!(seq, Some(7));
             }
             other => panic!("expected ChainFork, got {other:?}"),
         }
@@ -754,5 +837,148 @@ mod tests {
             .expect("undiscovered closer folded in");
         assert_eq!(folded.action_count, 0);
         assert!(folded.chain_closed && !folded.opening_summary_present);
+    }
+
+    /// A `DnaSnapshot` with `n` slice-hash rows and everything else empty, used
+    /// to drive the size-budget trimmer.
+    fn snapshot_with_slice_hashes(n: usize) -> DnaSnapshot {
+        DnaSnapshot {
+            dna_b64: "dna-test".to_string(),
+            dna_tag: None,
+            dna_definition: None,
+            agents: Vec::new(),
+            warrants: Vec::new(),
+            chain_summaries: Vec::new(),
+            slice_hashes: (0..n)
+                .map(|i| SliceHashRow {
+                    arc_start: 0,
+                    arc_end: u32::MAX,
+                    slice_index: i as u64,
+                    hash_b64: "a".repeat(64),
+                })
+                .collect(),
+            chain_locks: Vec::new(),
+            scheduled_functions: Vec::new(),
+            validation_coverage: Vec::new(),
+            cap_grants: Vec::new(),
+            derived_metrics: DerivedMetrics::default(),
+            pending_ops_count: Some(0),
+            integrated_ops_count: Some(0),
+        }
+    }
+
+    #[test]
+    fn warn_on_err_opt_reports_none_and_counts_a_degraded_read() {
+        let degraded = DegradedReads::default();
+
+        // A good read passes through untouched and is not counted.
+        let ok = warn_on_err_opt(Ok::<u32, String>(5), "probe", &degraded);
+        assert_eq!(ok, Some(5));
+        assert_eq!(degraded.count(), 0);
+
+        // A failed read is `None` — an explicit "unknown", not a fake zero — and
+        // is counted so alerts fire off `n_errors_this_cycle` (B107).
+        let degraded_read = warn_on_err_opt(Err::<u32, String>("boom".into()), "probe", &degraded);
+        assert_eq!(degraded_read, None);
+        assert_eq!(degraded.count(), 1);
+    }
+
+    #[test]
+    fn nonce_fields_keeps_degraded_duplicate_count_unknown() {
+        // A real read: both counts flow through; the duplicate count is `Some`
+        // even when it is a genuine zero.
+        assert_eq!(
+            nonce_fields(Some(extensions::NonceStats {
+                unique_count: 7,
+                duplicate_count: 0,
+            })),
+            (7, Some(0))
+        );
+
+        // A degraded read: `nonce_count` collapses to 0 (no ambiguous zero) but
+        // the duplicate count stays `None`, so the CLI shows "—" not a fake 0.
+        // This pins the deliberate count-vs-duplicate asymmetry (B107).
+        assert_eq!(nonce_fields(None), (0, None));
+    }
+
+    #[test]
+    fn op_count_u32_keeps_degraded_read_unknown() {
+        assert_eq!(op_count_u32(Some(5)), Some(5));
+        // A real zero stays `Some(0)`; only a degraded read (`None`) is unknown,
+        // so a future edit that collapsed the degraded branch to a fake 0 trips.
+        assert_eq!(op_count_u32(Some(0)), Some(0));
+        assert_eq!(op_count_u32(None), None);
+    }
+
+    #[test]
+    fn enforce_budget_trims_oversize_snapshots_and_counts_each_drop() {
+        let degraded = DegradedReads::default();
+        let mut snap = snapshot_with_slice_hashes(4000);
+        assert!(
+            unyt_watchtower_core::measure(&snap).unwrap() > MAX_DNA_SNAPSHOT_BYTES,
+            "test needs a snapshot that starts over budget",
+        );
+
+        enforce_budget(&mut snap, &degraded).expect("trims until it fits");
+
+        // It fits, rows were dropped from the lowest-value field first, and every
+        // trim was counted as a degraded read rather than dropped silently (B107).
+        assert!(unyt_watchtower_core::measure(&snap).unwrap() <= MAX_DNA_SNAPSHOT_BYTES);
+        assert!(snap.slice_hashes.len() < 4000);
+        assert!(
+            degraded.count() > 0,
+            "each truncation must count as a degraded read",
+        );
+    }
+
+    #[test]
+    fn enforce_budget_leaves_an_in_budget_snapshot_untouched() {
+        let degraded = DegradedReads::default();
+        let mut snap = snapshot_with_slice_hashes(1);
+        enforce_budget(&mut snap, &degraded).expect("already fits");
+        assert_eq!(snap.slice_hashes.len(), 1, "nothing trimmed");
+        assert_eq!(
+            degraded.count(),
+            0,
+            "an in-budget snapshot is not a degraded read"
+        );
+    }
+
+    fn warrant_row(i: usize) -> WarrantSummary {
+        WarrantSummary {
+            op_hash_b64: format!("op-{i}"),
+            warrant_type: "ChainFork".to_string(),
+            author_b64: "author".to_string(),
+            target_b64: "target".to_string(),
+            ts_iso: "t".to_string(),
+            authored_ts_iso: "t".to_string(),
+            integrated_ts_iso: None,
+            validation_status: None,
+            signature_b64: "sig".to_string(),
+            proof_summary: WarrantProofSummary::Other {
+                description: "d".to_string(),
+            },
+        }
+    }
+
+    /// The trim order puts warrants last because they are integrity evidence.
+    /// When a lower-value field (here `slice_hashes`) can absorb the whole
+    /// overage, the warrants must survive intact (B107).
+    #[test]
+    fn enforce_budget_trims_low_value_fields_before_warrants() {
+        let degraded = DegradedReads::default();
+        let mut snap = snapshot_with_slice_hashes(4000);
+        snap.warrants = (0..3).map(warrant_row).collect();
+        assert!(unyt_watchtower_core::measure(&snap).unwrap() > MAX_DNA_SNAPSHOT_BYTES);
+
+        enforce_budget(&mut snap, &degraded).expect("trims until it fits");
+
+        assert!(unyt_watchtower_core::measure(&snap).unwrap() <= MAX_DNA_SNAPSHOT_BYTES);
+        assert!(snap.slice_hashes.len() < 4000, "the bulk field was trimmed");
+        assert_eq!(
+            snap.warrants.len(),
+            3,
+            "warrants are trimmed last and must survive when a lower-value field can absorb the overage"
+        );
     }
 }

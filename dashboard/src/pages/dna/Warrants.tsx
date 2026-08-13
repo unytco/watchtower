@@ -111,6 +111,12 @@ function ProofCell({ proof }: { proof: WarrantProofSummary | null }) {
     return (
       <div className="space-y-1">
         <div className="text-muted">{proof.chain_op_type}</div>
+        {/* Holochain 0.7's human-readable rejection reason (B110). */}
+        {proof.reason && (
+          <div>
+            <span className="text-muted">reason:</span> {proof.reason}
+          </div>
+        )}
         <div>
           <span className="text-muted">action:</span>{" "}
           <CopyableHash value={proof.action_hash_b64} />
@@ -125,7 +131,10 @@ function ProofCell({ proof }: { proof: WarrantProofSummary | null }) {
   if (proof.kind === "ChainFork") {
     return (
       <div className="space-y-1">
-        <div className="text-muted">fork at:</div>
+        {/* `seq` localises the fork to a chain position (B110). */}
+        <div className="text-muted">
+          {proof.seq != null ? `fork at seq ${proof.seq}:` : "fork at:"}
+        </div>
         <div>
           <CopyableHash value={proof.action_a_hash_b64} />
         </div>

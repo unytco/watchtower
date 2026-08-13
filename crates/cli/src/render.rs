@@ -10,7 +10,8 @@ pub fn status(snap: &NodeSnapshot, observer_id: &str) {
     );
     println!(
         "nonces:   {} unique, {} duplicates",
-        snap.conductor.nonce_count, snap.conductor.nonce_duplicate_count
+        snap.conductor.nonce_count,
+        count_or_unknown(snap.conductor.nonce_duplicate_count)
     );
     println!("dnas:     {}", snap.dnas.len());
     for d in &snap.dnas {
@@ -19,10 +20,17 @@ pub fn status(snap: &NodeSnapshot, observer_id: &str) {
             "  - {name}: {} agents, {} warrants, pending={}, integrated={}",
             d.agents.len(),
             d.warrants.len(),
-            d.pending_ops_count,
-            d.integrated_ops_count
+            count_or_unknown(d.pending_ops_count),
+            count_or_unknown(d.integrated_ops_count)
         );
     }
+}
+
+/// Render an optional CLI count: a real value prints as itself, a degraded
+/// read (`None`) prints "—" so it reads as "unknown" rather than a fake `0`
+/// (B107).
+fn count_or_unknown(v: Option<u32>) -> String {
+    v.map(|n| n.to_string()).unwrap_or_else(|| "—".to_string())
 }
 
 #[derive(Tabled)]
@@ -66,10 +74,11 @@ struct WarrantRow {
 pub fn warrants(snap: &NodeSnapshot, filter: Option<&str>) {
     let mut rows = Vec::new();
     for d in &snap.dnas {
-        if let Some(f) = filter {
-            if d.dna_b64 != f && d.dna_tag.as_deref() != Some(f) {
-                continue;
-            }
+        if let Some(f) = filter
+            && d.dna_b64 != f
+            && d.dna_tag.as_deref() != Some(f)
+        {
+            continue;
         }
         let dna_name = d.dna_tag.clone().unwrap_or_else(|| truncate(&d.dna_b64));
         for w in &d.warrants {
@@ -181,5 +190,18 @@ fn truncate(s: &str) -> String {
         s.to_string()
     } else {
         format!("{}…{}", &s[..8], &s[s.len() - 4..])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_or_unknown;
+
+    #[test]
+    fn count_or_unknown_shows_dash_only_for_degraded_reads() {
+        assert_eq!(count_or_unknown(Some(5)), "5");
+        // A genuine zero still prints "0"; only a degraded read (None) prints "—".
+        assert_eq!(count_or_unknown(Some(0)), "0");
+        assert_eq!(count_or_unknown(None), "—");
     }
 }
