@@ -66,10 +66,11 @@ struct WarrantRow {
 pub fn warrants(snap: &NodeSnapshot, filter: Option<&str>) {
     let mut rows = Vec::new();
     for d in &snap.dnas {
-        if let Some(f) = filter {
-            if d.dna_b64 != f && d.dna_tag.as_deref() != Some(f) {
-                continue;
-            }
+        if let Some(f) = filter
+            && d.dna_b64 != f
+            && d.dna_tag.as_deref() != Some(f)
+        {
+            continue;
         }
         let dna_name = d.dna_tag.clone().unwrap_or_else(|| truncate(&d.dna_b64));
         for w in &d.warrants {
