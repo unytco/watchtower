@@ -19,11 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `lag_p50_ms` / `lag_p99_ms` are computed as `ChainOp.when_integrated − Action.timestamp`, and the percentile now uses nearest rank (the old index under-reported the tail).
 - `pending_ops_count` / `integrated_ops_count` are read from 0.7's split tables (`LimboChainOp` + `LimboWarrantOp`, `ChainOp` + `WarrantOp`); warrant ops stay counted.
 - `SelfHealth.n_errors_this_cycle` now reports degraded reads (was hard-coded `0`), and a failed `migration_status_by_author` drops its DNA from the snapshot rather than reporting every agent un-migrated.
-- Report a degraded observer read as `null` instead of a fake `0` for the derived metrics; the dashboard renders "—".
-- Apply D1 migration `0005_nullable_derived_metrics.sql` on redeploy, before the new observer.
+- Report degraded observer reads as `null` instead of `0` (apply D1 migration 0005 on redeploy).
 - pin Rust 1.95.0 (was 1.93.1): `sqlx` 0.9 requires ≥ 1.94, and 1.95 is what holonix `main-0.7` already provides.
-- clear Rust 1.95 clippy `collapsible_if` and `let_and_return` in the vendored `chain_doc` crate (behavior-preserving; kept byte-identical with `hc-chain-doc`).
-- clear the remaining Rust 1.95 clippy `collapsible_if` lints in `hc_store`, `collector`, and `cli` via behavior-preserving let-chain collapses, so `cargo clippy --workspace -- -D warnings` is green.
+- Clear the Rust 1.95 clippy warnings in the vendored `chain_doc` crate.
+- Clear the remaining Rust 1.95 clippy warnings across the workspace.
 - docs + example config follow the observer's move to the hash-explorer node (`make hash-explorer-watchtower` replaces the always-online target). Deploy mechanics unchanged.
 - D1 migration `0004_migration_counters.sql`: `agents_discovered` gains `chain_closed` and `opening_summary_present` (INTEGER, default 0). Apply on redeploy.
 - dashboard API contract: `GET /api/dnas/:dna/summary` gains `agents_closed` / `agents_opened`; `GET /api/dnas/:dna/agents` rows gain `chain_closed` / `opening_summary_present`.
@@ -37,4 +36,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Log and count each per-DNA snapshot budget-trim instead of dropping rows silently.
-- Surface zero-receipt ops in validation coverage — drive it from `ChainOp`, not the receipts table.
+- Surface zero-receipt ops in validation coverage.
