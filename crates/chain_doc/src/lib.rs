@@ -126,11 +126,11 @@ pub fn simplify_dump(
     rows.sort_by_key(|(idx, row)| (row.action_seq.unwrap_or(0), *idx));
     let mut seen_hashes = HashSet::new();
     for (_, row) in &mut rows {
-        if let Some(action_hash) = &row.action_hash {
-            if !seen_hashes.insert(action_hash.clone()) {
-                row.warnings
-                    .push(format!("Duplicate action_hash detected: {action_hash}"));
-            }
+        if let Some(action_hash) = &row.action_hash
+            && !seen_hashes.insert(action_hash.clone())
+        {
+            row.warnings
+                .push(format!("Duplicate action_hash detected: {action_hash}"));
         }
     }
 
@@ -276,14 +276,11 @@ fn decode_entry(
     let entry_data = match entry_type.as_deref() {
         Some("App") => decode_app_entry(entry_obj, warnings),
         Some("CapGrant") => entry_obj.get("entry").filter(|v| v.is_object()).cloned(),
-        Some("Agent") => {
-            let hash = entry_obj.get("entry").and_then(|v| {
-                let arr = v.as_array()?;
-                let bytes = collect_byte_array(arr)?;
-                Some(Value::String(URL_SAFE_NO_PAD.encode(bytes)))
-            });
-            hash
-        }
+        Some("Agent") => entry_obj.get("entry").and_then(|v| {
+            let arr = v.as_array()?;
+            let bytes = collect_byte_array(arr)?;
+            Some(Value::String(URL_SAFE_NO_PAD.encode(bytes)))
+        }),
         _ => None,
     };
 

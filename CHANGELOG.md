@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pending_ops_count` / `integrated_ops_count` are read from 0.7's split tables (`LimboChainOp` + `LimboWarrantOp`, `ChainOp` + `WarrantOp`); warrant ops stay counted.
 - `SelfHealth.n_errors_this_cycle` now reports degraded reads (was hard-coded `0`), and a failed `migration_status_by_author` drops its DNA from the snapshot rather than reporting every agent un-migrated.
 - pin Rust 1.95.0 (was 1.93.1): `sqlx` 0.9 requires ≥ 1.94, and 1.95 is what holonix `main-0.7` already provides.
+- clear Rust 1.95 clippy `collapsible_if` and `let_and_return` in the vendored `chain_doc` crate (behavior-preserving; kept byte-identical with `hc-chain-doc`).
 - docs + example config follow the observer's move to the hash-explorer node (`make hash-explorer-watchtower` replaces the always-online target). Deploy mechanics unchanged.
 - D1 migration `0004_migration_counters.sql`: `agents_discovered` gains `chain_closed` and `opening_summary_present` (INTEGER, default 0). Apply on redeploy.
 - dashboard API contract: `GET /api/dnas/:dna/summary` gains `agents_closed` / `agents_opened`; `GET /api/dnas/:dna/agents` rows gain `chain_closed` / `opening_summary_present`.
