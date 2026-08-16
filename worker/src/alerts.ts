@@ -2,11 +2,7 @@ import type { Env } from "./types";
 
 export interface AlertRule {
   id: string;
-  kind:
-    | "new_warrant"
-    | "observer_silent"
-    | "pending_backlog"
-    | "chain_lock_expired";
+  kind: "new_warrant" | "observer_silent" | "pending_backlog" | "chain_lock_expired";
   params: Record<string, string | number>;
   recipients: string[];
   enabled: boolean;

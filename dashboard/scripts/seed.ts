@@ -106,9 +106,7 @@ const ts = now.toISOString();
 const nonce = b64url(randomBytes(16));
 const digest = createHash("sha256").update(body).digest("hex");
 const canonical = [observerId, ts, nonce, digest].join("\n");
-const sig = createHmac("sha256", Buffer.from(secretHex, "hex"))
-  .update(canonical)
-  .digest("hex");
+const sig = createHmac("sha256", Buffer.from(secretHex, "hex")).update(canonical).digest("hex");
 
 const resp = await fetch(url, {
   method: "POST",

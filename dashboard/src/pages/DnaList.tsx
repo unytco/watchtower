@@ -13,9 +13,7 @@ export function DnaList() {
       <section>
         <div className="flex items-baseline justify-between mb-3">
           <h1 className="text-lg font-semibold">DNAs</h1>
-          {dnas.length > 0 && (
-            <div className="text-xs text-muted">{dnas.length} tracked</div>
-          )}
+          {dnas.length > 0 && <div className="text-xs text-muted">{dnas.length} tracked</div>}
         </div>
 
         {dnaError && (
@@ -26,8 +24,8 @@ export function DnaList() {
 
         {!dnaError && dnas.length === 0 && !isLoading && (
           <div className="border border-border rounded p-6 text-center text-sm text-muted">
-            No DNAs reported yet. Start{" "}
-            <span className="mono">hc-watchtower-observer</span> on a node.
+            No DNAs reported yet. Start <span className="mono">hc-watchtower-observer</span> on a
+            node.
           </div>
         )}
 
@@ -42,9 +40,7 @@ export function DnaList() {
               >
                 <div className="flex items-baseline justify-between gap-2">
                   <div className="font-semibold">{tag}</div>
-                  <div className="text-xs text-muted">
-                    {relTime(d.last_activity_iso)}
-                  </div>
+                  <div className="text-xs text-muted">{relTime(d.last_activity_iso)}</div>
                 </div>
                 {d.dna_tag && (
                   <div className="text-xs text-muted mt-0.5">
@@ -70,23 +66,11 @@ export function DnaList() {
   );
 }
 
-function MiniStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone?: "danger";
-}) {
+function MiniStat({ label, value, tone }: { label: string; value: number; tone?: "danger" }) {
   return (
     <div>
-      <div className="text-[10px] text-muted uppercase tracking-wider">
-        {label}
-      </div>
-      <div
-        className={`text-lg font-semibold mono ${tone === "danger" ? "text-danger" : ""}`}
-      >
+      <div className="text-[10px] text-muted uppercase tracking-wider">{label}</div>
+      <div className={`text-lg font-semibold mono ${tone === "danger" ? "text-danger" : ""}`}>
         {value.toLocaleString()}
       </div>
     </div>
@@ -100,9 +84,7 @@ function FleetStrip() {
   if (observers.length === 0) return null;
   return (
     <section>
-      <div className="text-[10px] text-muted uppercase tracking-wider mb-2">
-        Fleet
-      </div>
+      <div className="text-[10px] text-muted uppercase tracking-wider mb-2">Fleet</div>
       <div className="flex flex-wrap gap-2">
         {observers.map((o) => (
           <div

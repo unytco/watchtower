@@ -8,7 +8,9 @@
     "d1:migrate:local": "wrangler d1 execute watchtower --local --file=./src/schema.sql",
     "d1:migrate:remote": "wrangler d1 execute watchtower --remote --file=./src/schema.sql",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\""
   },
   "dependencies": {
     "hono": "^4.6.0"
@@ -16,6 +18,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.5.0",
     "@cloudflare/workers-types": "^4.20250101.0",
+    "prettier": "^3.9.6",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0",
     "wrangler": "^3.90.0"

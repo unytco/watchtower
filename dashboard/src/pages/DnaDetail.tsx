@@ -64,9 +64,7 @@ export function DnaDetail() {
             end={t.end}
             className={({ isActive }) =>
               `px-3 py-2 text-sm -mb-px border-b-2 ${
-                isActive
-                  ? "border-accent text-fg"
-                  : "border-transparent text-muted hover:text-fg"
+                isActive ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"
               }`
             }
           >
@@ -80,15 +78,7 @@ export function DnaDetail() {
   );
 }
 
-function Tile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone?: "danger";
-}) {
+function Tile({ label, value, tone }: { label: string; value: number; tone?: "danger" }) {
   // Stable, label-derived test id on the value so a test can target one tile
   // (e.g. the migration counters) without matching another tile that happens
   // to share its number.

@@ -100,14 +100,7 @@ function pushDna(
          dna_tag = excluded.dna_tag,
          last_seen_iso = excluded.last_seen_iso,
          updated_at = excluded.updated_at`,
-    ).bind(
-      observer_id,
-      d.dna_b64,
-      d.dna_tag ?? null,
-      collected_at,
-      collected_at,
-      collected_at,
-    ),
+    ).bind(observer_id, d.dna_b64, d.dna_tag ?? null, collected_at, collected_at, collected_at),
   );
 
   if (d.dna_definition) {
@@ -170,9 +163,7 @@ function pushDna(
   }
 
   for (const w of d.warrants) {
-    const proofJson = w.proof_summary
-      ? JSON.stringify(w.proof_summary)
-      : null;
+    const proofJson = w.proof_summary ? JSON.stringify(w.proof_summary) : null;
     batch.push(
       env.DB.prepare(
         `INSERT INTO warrants (observer_id, dna_b64, op_hash_b64, warrant_type,

@@ -1,11 +1,4 @@
-import {
-  LineChart,
-  Line,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatBucketLocal } from "../lib/format";
 import { formatMetric, type MetricField } from "../lib/metricHelp";
 

@@ -247,7 +247,9 @@ routes.get("/warrants", async (c) => {
   }
   sql += ` ORDER BY ts_iso DESC LIMIT ?`;
   binds.push(limit);
-  const { results } = await c.env.DB.prepare(sql).bind(...binds).all();
+  const { results } = await c.env.DB.prepare(sql)
+    .bind(...binds)
+    .all();
   return c.json({ warrants: results });
 });
 
@@ -268,7 +270,9 @@ routes.get("/metrics", async (c) => {
     binds.push(dna);
   }
   sql += ` ORDER BY bucket_hour_iso ASC`;
-  const { results } = await c.env.DB.prepare(sql).bind(...binds).all();
+  const { results } = await c.env.DB.prepare(sql)
+    .bind(...binds)
+    .all();
   return c.json({ metrics: results });
 });
 

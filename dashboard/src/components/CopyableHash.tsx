@@ -69,8 +69,7 @@ export function CopyableHash({
     [copy],
   );
 
-  const display =
-    label && label.length > 0 ? label : truncHash(prefixed, head, tail);
+  const display = label && label.length > 0 ? label : truncHash(prefixed, head, tail);
 
   return (
     <span
@@ -123,15 +122,7 @@ function CopyIcon({ copied }: { copied: boolean }) {
       fill="none"
       className="shrink-0 text-muted opacity-0 group-hover:opacity-70 group-focus-visible:opacity-100 transition-opacity"
     >
-      <rect
-        x="5"
-        y="5"
-        width="8"
-        height="8"
-        rx="1.5"
-        stroke="currentColor"
-        strokeWidth="1.25"
-      />
+      <rect x="5" y="5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.25" />
       <path
         d="M3 11V4.5A1.5 1.5 0 0 1 4.5 3H11"
         stroke="currentColor"

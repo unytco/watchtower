@@ -41,12 +41,8 @@ export function DnaObservers() {
                     <CopyableHash value={o.observer_id} />
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right mono">
-                  {o.agents_seen.toLocaleString()}
-                </td>
-                <td className="px-3 py-2 text-right mono">
-                  {o.actions_reported.toLocaleString()}
-                </td>
+                <td className="px-3 py-2 text-right mono">{o.agents_seen.toLocaleString()}</td>
+                <td className="px-3 py-2 text-right mono">{o.actions_reported.toLocaleString()}</td>
                 <td className="px-3 py-2">{relTime(o.dna_last_seen)}</td>
                 <td className="px-3 py-2">{relTime(o.observer_last_seen)}</td>
                 <td className="px-3 py-2 text-right mono">
@@ -54,17 +50,12 @@ export function DnaObservers() {
                     {o.n_errors ?? 0}
                   </span>
                 </td>
-                <td className="px-3 py-2 mono text-xs">
-                  {o.binary_version ?? "—"}
-                </td>
+                <td className="px-3 py-2 mono text-xs">{o.binary_version ?? "—"}</td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td
-                  className="px-3 py-6 text-center text-muted"
-                  colSpan={7}
-                >
+                <td className="px-3 py-6 text-center text-muted" colSpan={7}>
                   No observers reporting this DNA yet.
                 </td>
               </tr>

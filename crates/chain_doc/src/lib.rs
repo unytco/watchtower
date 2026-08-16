@@ -1,3 +1,7 @@
+//! Vendored from `hc-chain-doc`, one-way and by hand: edit that crate, then copy its
+//! `lib.rs` back over this one and restore this header. An edit made only here is lost
+//! at the next sync, and until then the two decoders disagree about the same dump.
+
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
