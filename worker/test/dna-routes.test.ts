@@ -178,9 +178,7 @@ describe("DNA-scoped routes", () => {
   });
 
   it("GET /api/dnas/:dna/agents?per_observer=1 returns one row per (observer, agent)", async () => {
-    const resp = await SELF.fetch(
-      `http://test/api/dnas/${DNA_A}/agents?per_observer=1`,
-    );
+    const resp = await SELF.fetch(`http://test/api/dnas/${DNA_A}/agents?per_observer=1`);
     const body = await resp.json<{ agents: unknown[]; per_observer: boolean }>();
     expect(body.per_observer).toBe(true);
     expect(body.agents.length).toBe(3);
@@ -253,7 +251,19 @@ describe("DNA-scoped routes", () => {
                proof_summary_json)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       ).bind(
-        OBS_X, DNA_P, op, type, AGENT_1, AGENT_2, now, now, now, now, now, "Valid", "sig",
+        OBS_X,
+        DNA_P,
+        op,
+        type,
+        AGENT_1,
+        AGENT_2,
+        now,
+        now,
+        now,
+        now,
+        now,
+        "Valid",
+        "sig",
         JSON.stringify(proof),
       );
     await env.DB.batch([

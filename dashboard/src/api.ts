@@ -117,9 +117,7 @@ export type WarrantProofSummary =
     }
   | { kind: "Other"; description: string };
 
-export function parseProofSummary(
-  raw: string | null,
-): WarrantProofSummary | null {
+export function parseProofSummary(raw: string | null): WarrantProofSummary | null {
   if (!raw) return null;
   try {
     const obj = JSON.parse(raw);
@@ -157,11 +155,9 @@ export function useDnaList() {
 }
 
 export function useDnaSummary(dna: string | undefined) {
-  return useSWR<DnaSummary>(
-    dna ? `/api/dnas/${encodeURIComponent(dna)}/summary` : null,
-    fetcher,
-    { refreshInterval: 30_000 },
-  );
+  return useSWR<DnaSummary>(dna ? `/api/dnas/${encodeURIComponent(dna)}/summary` : null, fetcher, {
+    refreshInterval: 30_000,
+  });
 }
 
 export function useDnaAgents(
@@ -186,9 +182,7 @@ export function useDnaObservers(dna: string | undefined) {
   );
 }
 
-export function useWarrants(
-  opts: { observerId?: string; dna?: string; limit?: number } = {},
-) {
+export function useWarrants(opts: { observerId?: string; dna?: string; limit?: number } = {}) {
   const params = new URLSearchParams();
   if (opts.observerId) params.set("observer_id", opts.observerId);
   if (opts.dna) params.set("dna", opts.dna);
@@ -197,19 +191,14 @@ export function useWarrants(
   return useSWR<{ warrants: Warrant[] }>(`/api/warrants${qs}`, fetcher);
 }
 
-export function useMetrics(
-  opts: { observerId?: string; dna?: string; hours?: number } = {},
-) {
+export function useMetrics(opts: { observerId?: string; dna?: string; hours?: number } = {}) {
   const params = new URLSearchParams({ hours: String(opts.hours ?? 24) });
   if (opts.observerId) params.set("observer_id", opts.observerId);
   if (opts.dna) params.set("dna", opts.dna);
   return useSWR<{ metrics: MetricPoint[] }>(`/api/metrics?${params}`, fetcher);
 }
 
-export function useDiff(
-  since: string,
-  opts: { observerId?: string; dna?: string } = {},
-) {
+export function useDiff(since: string, opts: { observerId?: string; dna?: string } = {}) {
   const params = new URLSearchParams({ since });
   if (opts.observerId) params.set("observer_id", opts.observerId);
   if (opts.dna) params.set("dna", opts.dna);

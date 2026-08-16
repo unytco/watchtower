@@ -2,9 +2,7 @@ import { test, expect } from "@playwright/test";
 
 const DNA_B64 = "dna-hC0k-test";
 
-test("home renders DNA list and fleet strip, click-through opens DNA detail", async ({
-  page,
-}) => {
+test("home renders DNA list and fleet strip, click-through opens DNA detail", async ({ page }) => {
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -94,12 +92,8 @@ test("home renders DNA list and fleet strip, click-through opens DNA detail", as
 
   await page.goto("/");
 
-  await expect(
-    page.getByRole("link", { name: "watchtower", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "DNAs", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "watchtower", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "DNAs", exact: true })).toBeVisible();
   await expect(page.getByText("Fleet")).toBeVisible();
   await expect(page.getByText("heart-always-online-2")).toBeVisible();
 
@@ -108,9 +102,7 @@ test("home renders DNA list and fleet strip, click-through opens DNA detail", as
 
   await page.getByText("unyt").first().click();
 
-  await expect(page).toHaveURL(
-    new RegExp(`/dnas/${encodeURIComponent(DNA_B64)}$`),
-  );
+  await expect(page).toHaveURL(new RegExp(`/dnas/${encodeURIComponent(DNA_B64)}$`));
   await expect(page.getByText("Total actions")).toBeVisible();
   // Migration counters render on the DNA's existing detail view.
   await expect(page.getByText("Agents closed")).toBeVisible();
@@ -119,17 +111,11 @@ test("home renders DNA list and fleet strip, click-through opens DNA detail", as
   await page.getByRole("link", { name: "Agents", exact: true }).click();
   await expect(page.getByText("agent-A")).toBeVisible();
   // The per-agent migration flags render as their own columns.
-  await expect(
-    page.getByRole("columnheader", { name: "Closed" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("columnheader", { name: "Opened" }),
-  ).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Closed" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Opened" })).toBeVisible();
 });
 
-test("DNA with no migrations renders the counters at zero", async ({
-  page,
-}) => {
+test("DNA with no migrations renders the counters at zero", async ({ page }) => {
   // Outside a migration window the summary reports zero closed/opened; the
   // tiles must still render (as 0), not blank or error.
   await page.route("**/api/**", async (route) => {

@@ -5,12 +5,7 @@ import { CopyableHash } from "../../components/CopyableHash";
 import { HelpTip } from "../../components/HelpTip";
 import { BridgeServicePanel } from "../../components/BridgeServicePanel";
 import { labelForAgent, relTime } from "../../lib/format";
-import {
-  formatMetric,
-  metricHelp,
-  metricLabels,
-  type MetricField,
-} from "../../lib/metricHelp";
+import { formatMetric, metricHelp, metricLabels, type MetricField } from "../../lib/metricHelp";
 
 type Ctx = { dna: string };
 
@@ -20,22 +15,18 @@ export function DnaOverview() {
   const { data: warrants } = useWarrants({ dna, limit: 5 });
   const { data: agentsData } = useDnaAgents(dna, { limit: 5 });
 
-  const metricRows = (metrics?.metrics ?? []).slice().sort((a, b) =>
-    a.bucket_hour_iso.localeCompare(b.bucket_hour_iso),
-  );
+  const metricRows = (metrics?.metrics ?? [])
+    .slice()
+    .sort((a, b) => a.bucket_hour_iso.localeCompare(b.bucket_hour_iso));
   const lastBucket = metricRows[metricRows.length - 1]?.bucket_hour_iso;
 
   return (
     <div className="space-y-6">
       <section>
         <div className="flex items-baseline justify-between mb-2">
-          <h2 className="text-sm text-muted uppercase tracking-wider">
-            Last 24h
-          </h2>
+          <h2 className="text-sm text-muted uppercase tracking-wider">Last 24h</h2>
           {lastBucket && (
-            <div className="text-xs text-muted">
-              last bucket {relTime(lastBucket)}
-            </div>
+            <div className="text-xs text-muted">last bucket {relTime(lastBucket)}</div>
           )}
         </div>
         <div className="bg-surface border border-border rounded p-4 space-y-2">
@@ -57,28 +48,20 @@ export function DnaOverview() {
         <div className="bg-surface border border-border rounded p-4">
           <div className="flex items-baseline justify-between mb-3">
             <h3 className="text-sm font-semibold">Top agents</h3>
-            <Link
-              to="agents"
-              className="text-xs text-muted hover:text-fg"
-            >
+            <Link to="agents" className="text-xs text-muted hover:text-fg">
               all agents →
             </Link>
           </div>
           <ul className="space-y-1 text-sm">
             {(agentsData?.agents ?? []).map((a) => (
-              <li
-                key={a.agent_b64}
-                className="flex items-center justify-between gap-2"
-              >
+              <li key={a.agent_b64} className="flex items-center justify-between gap-2">
                 <span className="text-xs truncate min-w-0">
                   <CopyableHash
                     value={a.agent_b64}
                     label={labelForAgent(a.agent_tag, a.agent_b64)}
                   />
                 </span>
-                <span className="mono text-xs">
-                  {a.action_count.toLocaleString()}
-                </span>
+                <span className="mono text-xs">{a.action_count.toLocaleString()}</span>
               </li>
             ))}
             {(agentsData?.agents ?? []).length === 0 && (
@@ -90,10 +73,7 @@ export function DnaOverview() {
         <div className="bg-surface border border-border rounded p-4">
           <div className="flex items-baseline justify-between mb-3">
             <h3 className="text-sm font-semibold">Recent warrants</h3>
-            <Link
-              to="warrants"
-              className="text-xs text-muted hover:text-fg"
-            >
+            <Link to="warrants" className="text-xs text-muted hover:text-fg">
               all warrants →
             </Link>
           </div>
@@ -105,7 +85,9 @@ export function DnaOverview() {
               >
                 <span className="text-xs truncate min-w-0 flex items-center gap-1">
                   <span className="mono">{w.warrant_type}</span>
-                  <span aria-hidden className="text-muted">·</span>
+                  <span aria-hidden className="text-muted">
+                    ·
+                  </span>
                   <CopyableHash value={w.author_b64} />
                 </span>
                 <span className="text-xs text-muted">{relTime(w.ts_iso)}</span>
@@ -141,16 +123,12 @@ function SparkRow({
     <div className="flex items-center gap-3">
       <div className="w-36 text-xs text-muted flex items-center gap-1.5">
         <span>{metricLabels[field]}</span>
-        <HelpTip label={`What is ${metricLabels[field]}?`}>
-          {metricHelp[field]}
-        </HelpTip>
+        <HelpTip label={`What is ${metricLabels[field]}?`}>{metricHelp[field]}</HelpTip>
       </div>
       <div className="flex-1 min-w-0">
         <Sparkline data={data} field={field} height={40} />
       </div>
-      <div className="w-24 text-right mono text-sm">
-        {formatMetric(field, last)}
-      </div>
+      <div className="w-24 text-right mono text-sm">{formatMetric(field, last)}</div>
     </div>
   );
 }

@@ -55,14 +55,13 @@ export function Alerts() {
                   <td className="px-3 py-2 mono text-xs">{i.entity_key}</td>
                   <td className="px-3 py-2">{relTime(i.fired_at)}</td>
                   <td className="px-3 py-2">
-                    <span className={i.state === "open" ? "text-danger" : "text-muted"}>{i.state}</span>
+                    <span className={i.state === "open" ? "text-danger" : "text-muted"}>
+                      {i.state}
+                    </span>
                   </td>
                   <td className="px-3 py-2 text-right">
                     {i.state === "open" && (
-                      <button
-                        className="chip hover:bg-border"
-                        onClick={() => resolve(i.id)}
-                      >
+                      <button className="chip hover:bg-border" onClick={() => resolve(i.id)}>
                         Resolve
                       </button>
                     )}

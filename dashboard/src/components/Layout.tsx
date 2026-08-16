@@ -42,7 +42,8 @@ export function Layout() {
         <Outlet />
       </main>
       <footer className="border-t border-border text-xs text-muted text-center py-3">
-        Tier-1 summaries only. Bulk exports via <span className="mono">hc-watchtower export-*</span> on the observer host.
+        Tier-1 summaries only. Bulk exports via <span className="mono">hc-watchtower export-*</span>{" "}
+        on the observer host.
       </footer>
     </div>
   );

@@ -19,20 +19,14 @@ export function BridgeServicePanel({ dna }: { dna: string }) {
   const services = data?.services ?? [];
   if (services.length === 0) return null;
 
-  const backlogByObs = new Map(
-    (data?.backlog ?? []).map((b) => [b.observer_id, b]),
-  );
+  const backlogByObs = new Map((data?.backlog ?? []).map((b) => [b.observer_id, b]));
 
   return (
     <section>
       <div className="flex items-baseline justify-between mb-2">
-        <h2 className="text-sm text-muted uppercase tracking-wider">
-          Bridge service
-        </h2>
+        <h2 className="text-sm text-muted uppercase tracking-wider">Bridge service</h2>
         <div className="text-xs text-muted">
-          {services.length === 1
-            ? "1 reporter"
-            : `${services.length} reporters`}
+          {services.length === 1 ? "1 reporter" : `${services.length} reporters`}
         </div>
       </div>
       <div className="space-y-4">
@@ -41,9 +35,7 @@ export function BridgeServicePanel({ dna }: { dna: string }) {
             key={s.observer_id}
             service={s}
             backlog={backlogByObs.get(s.observer_id)}
-            throughput={(data?.throughput ?? []).filter(
-              (t) => t.observer_id === s.observer_id,
-            )}
+            throughput={(data?.throughput ?? []).filter((t) => t.observer_id === s.observer_id)}
           />
         ))}
       </div>
@@ -87,18 +79,14 @@ function ServiceRow({
     <div className="bg-surface border border-border rounded p-4">
       <header className="flex items-baseline justify-between mb-3 gap-2">
         <div className="min-w-0">
-          <div className="text-sm font-semibold truncate">
-            {service.observer_id}
-          </div>
+          <div className="text-sm font-semibold truncate">{service.observer_id}</div>
           <div className="text-xs text-muted">
             version {service.binary_version} · uptime {formatUptime(service.uptime_s)}
           </div>
         </div>
         <div className="flex items-center gap-1.5">
           <StatusBadge status={status} />
-          <HelpTip label="Bridge service status legend">
-            {bridgeHelp.status_badge}
-          </HelpTip>
+          <HelpTip label="Bridge service status legend">{bridgeHelp.status_badge}</HelpTip>
         </div>
       </header>
 
@@ -110,20 +98,14 @@ function ServiceRow({
         />
         <Tile label="queued" value={backlog?.queued} help="queued" />
         <Tile label="in flight" value={backlog?.in_flight} help="in_flight" />
-        <Tile
-          label="failed (24h)"
-          value={sumBucket(throughput, "failed")}
-          help="failed_24h"
-        />
+        <Tile label="failed (24h)" value={sumBucket(throughput, "failed")} help="failed_24h" />
       </div>
 
       {succeededSpark.length > 0 && (
         <div className="mb-3">
           <div className="text-xs text-muted mb-1 flex items-center gap-1.5">
             <span>succeeded (rolling 1h) · hourly samples</span>
-            <HelpTip label="What is succeeded (rolling 1h)?">
-              {bridgeHelp.succeeded_spark}
-            </HelpTip>
+            <HelpTip label="What is succeeded (rolling 1h)?">{bridgeHelp.succeeded_spark}</HelpTip>
           </div>
           <Sparkline data={succeededSpark} height={40} />
         </div>
@@ -144,17 +126,12 @@ function ServiceRow({
       <footer className="text-xs text-muted flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="inline-flex items-center gap-1.5">
           <span>
-            last cycle{" "}
-            {service.last_cycle_at_iso
-              ? relTime(service.last_cycle_at_iso)
-              : "never"}
+            last cycle {service.last_cycle_at_iso ? relTime(service.last_cycle_at_iso) : "never"}
             {service.last_cycle_ms != null
               ? ` · ${(service.last_cycle_ms / 1000).toFixed(1)}s`
               : ""}
           </span>
-          <HelpTip label="What is last cycle?">
-            {bridgeHelp.last_cycle}
-          </HelpTip>
+          <HelpTip label="What is last cycle?">{bridgeHelp.last_cycle}</HelpTip>
         </span>
         {service.consecutive_failed_cycles > 0 && (
           <span className="inline-flex items-center gap-1.5 text-amber-400">
@@ -174,12 +151,8 @@ function ServiceRow({
         )}
         {backlog?.oldest_queued_age_s != null && (
           <span className="inline-flex items-center gap-1.5">
-            <span>
-              oldest queued {formatUptime(backlog.oldest_queued_age_s)}
-            </span>
-            <HelpTip label="What is oldest queued?">
-              {bridgeHelp.oldest_queued_age_s}
-            </HelpTip>
+            <span>oldest queued {formatUptime(backlog.oldest_queued_age_s)}</span>
+            <HelpTip label="What is oldest queued?">{bridgeHelp.oldest_queued_age_s}</HelpTip>
           </span>
         )}
         {service.last_error && (
@@ -241,16 +214,10 @@ function Tile({
     <div className="bg-bg border border-border rounded p-2">
       <div className="text-xs text-muted flex items-center gap-1.5">
         <span>{label}</span>
-        {help && (
-          <HelpTip label={`What is ${label}?`}>{bridgeHelp[help]}</HelpTip>
-        )}
+        {help && <HelpTip label={`What is ${label}?`}>{bridgeHelp[help]}</HelpTip>}
       </div>
       <div className="mono text-lg">
-        {value == null
-          ? "—"
-          : typeof value === "number"
-            ? value.toLocaleString()
-            : value}
+        {value == null ? "—" : typeof value === "number" ? value.toLocaleString() : value}
       </div>
     </div>
   );
@@ -264,10 +231,7 @@ function formatSecsHuman(s: number | null | undefined): string | null {
   return `${(s / 86_400).toFixed(1)}d`;
 }
 
-function sumBucket(
-  rows: BridgeThroughputRow[],
-  field: "succeeded" | "failed",
-): number {
+function sumBucket(rows: BridgeThroughputRow[], field: "succeeded" | "failed"): number {
   return rows.reduce((acc, r) => acc + (r[field] ?? 0), 0);
 }
 

@@ -45,10 +45,7 @@ export async function verifyAndParseBridge(
   // (v1) and forward-compatible any future bumps by rejecting unknown
   // versions cleanly.
   if (headers.schemaVersion !== "1") {
-    return textResponse(
-      409,
-      `bridge schema mismatch: reporter=${headers.schemaVersion}, worker=1`,
-    );
+    return textResponse(409, `bridge schema mismatch: reporter=${headers.schemaVersion}, worker=1`);
   }
 
   const ts = Date.parse(headers.ts);
@@ -73,17 +70,13 @@ export async function verifyAndParseBridge(
     return textResponse(401, "bad signature");
   }
 
-  const exists = await env.DB.prepare(
-    "SELECT 1 FROM ingest_nonces WHERE nonce = ? LIMIT 1",
-  )
+  const exists = await env.DB.prepare("SELECT 1 FROM ingest_nonces WHERE nonce = ? LIMIT 1")
     .bind(headers.nonce)
     .first();
   if (exists) {
     return textResponse(409, "replayed nonce");
   }
-  await env.DB.prepare(
-    "INSERT INTO ingest_nonces (nonce, observer_id, ts) VALUES (?, ?, ?)",
-  )
+  await env.DB.prepare("INSERT INTO ingest_nonces (nonce, observer_id, ts) VALUES (?, ?, ?)")
     .bind(headers.nonce, headers.observerId, headers.ts)
     .run();
 
@@ -121,11 +114,7 @@ async function sha256Hex(buf: ArrayBuffer): Promise<string> {
   return hex(new Uint8Array(digest));
 }
 
-async function hmacVerify(
-  secretHex: string,
-  message: string,
-  sigHex: string,
-): Promise<boolean> {
+async function hmacVerify(secretHex: string, message: string, sigHex: string): Promise<boolean> {
   const keyBytes = fromHex(secretHex);
   const key = await crypto.subtle.importKey(
     "raw",

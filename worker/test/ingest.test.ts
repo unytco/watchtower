@@ -132,9 +132,7 @@ describe("/ingest", () => {
   });
 
   it("rejects unknown observer", async () => {
-    const resp = await SELF.fetch(
-      await signedRequest(minimalPayload(), { observer: "nobody" }),
-    );
+    const resp = await SELF.fetch(await signedRequest(minimalPayload(), { observer: "nobody" }));
     expect(resp.status).toBe(401);
   });
 });

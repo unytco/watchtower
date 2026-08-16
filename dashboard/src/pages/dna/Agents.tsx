@@ -16,8 +16,7 @@ export function DnaAgents() {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div className="text-xs text-muted">
-          {rows.length.toLocaleString()}{" "}
-          {perObserver ? "(observer, agent) pair" : "agent"}
+          {rows.length.toLocaleString()} {perObserver ? "(observer, agent) pair" : "agent"}
           {rows.length === 1 ? "" : "s"} in scope
         </div>
         <label className="flex items-center gap-2 text-xs text-muted">
@@ -38,9 +37,7 @@ export function DnaAgents() {
               <th className="text-left px-3 py-2">Agent</th>
               {perObserver && <th className="text-left px-3 py-2">Observer</th>}
               <th className="text-right px-3 py-2">Actions</th>
-              {!perObserver && (
-                <th className="text-right px-3 py-2">Observers</th>
-              )}
+              {!perObserver && <th className="text-right px-3 py-2">Observers</th>}
               <th className="text-right px-3 py-2">Warrants issued</th>
               <th className="text-right px-3 py-2">Warrants against</th>
               <th className="text-center px-3 py-2">Closed</th>
@@ -50,9 +47,7 @@ export function DnaAgents() {
           </thead>
           <tbody>
             {rows.map((r) => {
-              const key = perObserver
-                ? `${r.observer_id}-${r.agent_b64}`
-                : r.agent_b64;
+              const key = perObserver ? `${r.observer_id}-${r.agent_b64}` : r.agent_b64;
               return (
                 <tr key={key} className="border-t border-border">
                   <td className="px-3 py-2">
@@ -71,21 +66,13 @@ export function DnaAgents() {
                       <CopyableHash value={r.observer_id ?? ""} />
                     </td>
                   )}
-                  <td className="px-3 py-2 text-right mono">
-                    {r.action_count.toLocaleString()}
-                  </td>
+                  <td className="px-3 py-2 text-right mono">{r.action_count.toLocaleString()}</td>
                   {!perObserver && (
-                    <td className="px-3 py-2 text-right mono">
-                      {r.observer_count}
-                    </td>
+                    <td className="px-3 py-2 text-right mono">{r.observer_count}</td>
                   )}
+                  <td className="px-3 py-2 text-right mono">{r.warrants_issued}</td>
                   <td className="px-3 py-2 text-right mono">
-                    {r.warrants_issued}
-                  </td>
-                  <td className="px-3 py-2 text-right mono">
-                    <span
-                      className={r.warrants_against > 0 ? "text-danger" : ""}
-                    >
+                    <span className={r.warrants_against > 0 ? "text-danger" : ""}>
                       {r.warrants_against}
                     </span>
                   </td>

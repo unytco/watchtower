@@ -13,9 +13,7 @@ import { evaluate } from "./alerts";
 ///   6. Evaluate alert rules and fire incidents.
 export async function scheduled(env: Env): Promise<void> {
   const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  await env.DB.prepare("DELETE FROM ingest_nonces WHERE ts < ?")
-    .bind(tenMinAgo)
-    .run();
+  await env.DB.prepare("DELETE FROM ingest_nonces WHERE ts < ?").bind(tenMinAgo).run();
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   await env.DB.prepare("DELETE FROM derived_metrics_ts WHERE bucket_hour_iso < ?")

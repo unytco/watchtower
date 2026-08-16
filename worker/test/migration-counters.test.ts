@@ -59,11 +59,7 @@ function fromHex(s: string): Uint8Array {
   return out;
 }
 
-function agent(
-  agent_b64: string,
-  chain_closed: boolean,
-  opening_summary_present: boolean,
-) {
+function agent(agent_b64: string, chain_closed: boolean, opening_summary_present: boolean) {
   const now = new Date().toISOString();
   return {
     agent_b64,
@@ -78,9 +74,7 @@ function agent(
   };
 }
 
-function payload(
-  agents: ReturnType<typeof agent>[],
-): object {
+function payload(agents: ReturnType<typeof agent>[]): object {
   return {
     schema_version: 1,
     observer_id: OBSERVER_ID,
@@ -154,9 +148,7 @@ async function ingest(bodyObj: unknown) {
 }
 
 async function rowCount(): Promise<number> {
-  const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS c FROM agents_discovered WHERE dna_b64 = ?",
-  )
+  const row = await env.DB.prepare("SELECT COUNT(*) AS c FROM agents_discovered WHERE dna_b64 = ?")
     .bind(DNA)
     .first<{ c: number }>();
   return row?.c ?? 0;

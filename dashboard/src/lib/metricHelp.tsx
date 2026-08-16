@@ -4,11 +4,7 @@ import type { ReactNode } from "react";
 // watchtower/crates/hc_store/src/extensions.rs lines 171-242 and
 // watchtower/crates/collector/src/tier1.rs lines 299-308.
 
-export type MetricField =
-  | "integration_rate"
-  | "lag_p50_ms"
-  | "lag_p99_ms"
-  | "pending_backlog";
+export type MetricField = "integration_rate" | "lag_p50_ms" | "lag_p99_ms" | "pending_backlog";
 
 export const metricLabels: Record<MetricField, string> = {
   integration_rate: "Integration rate",
@@ -25,49 +21,45 @@ export const metricHelp: Record<MetricField, ReactNode> = {
         <span className="mono">ops/second</span>.
       </div>
       <div className="text-muted">
-        Measured as{" "}
-        <span className="mono">integrated_ops / lag_window_s</span> over the most
-        recent lag window (default 5 min). A flat zero with a non-zero backlog
-        means integration is stalled.
+        Measured as <span className="mono">integrated_ops / lag_window_s</span> over the most recent
+        lag window (default 5 min). A flat zero with a non-zero backlog means integration is
+        stalled.
       </div>
     </div>
   ),
   lag_p50_ms: (
     <div className="space-y-1.5">
       <div>
-        Median time between an op being <em>authored</em> and this observer{" "}
-        <em>integrating</em> it, in milliseconds.
+        Median time between an op being <em>authored</em> and this observer <em>integrating</em> it,
+        in milliseconds.
       </div>
       <div className="text-muted">
-        Computed from{" "}
-        <span className="mono">ChainOp.when_integrated − Action.timestamp</span>{" "}
-        over the lag window. Lower is better; healthy DHTs typically stay well
-        under a second.
+        Computed from <span className="mono">ChainOp.when_integrated − Action.timestamp</span> over
+        the lag window. Lower is better; healthy DHTs typically stay well under a second.
       </div>
     </div>
   ),
   lag_p99_ms: (
     <div className="space-y-1.5">
       <div>
-        99th percentile of the same integration lag — the tail latency that the
-        worst 1% of ops experience.
+        99th percentile of the same integration lag — the tail latency that the worst 1% of ops
+        experience.
       </div>
       <div className="text-muted">
-        Sustained spikes usually point at validation bottlenecks, slow peers,
-        or ops that keep being re-fetched.
+        Sustained spikes usually point at validation bottlenecks, slow peers, or ops that keep being
+        re-fetched.
       </div>
     </div>
   ),
   pending_backlog: (
     <div className="space-y-1.5">
       <div>
-        DHT ops this observer has received but hasn't integrated yet
-        (<span className="mono">when_integrated IS NULL</span>).
+        DHT ops this observer has received but hasn't integrated yet (
+        <span className="mono">when_integrated IS NULL</span>).
       </div>
       <div className="text-muted">
-        Trend matters more than the absolute number: a backlog that keeps
-        growing means integration is falling behind; flat or declining is
-        healthy.
+        Trend matters more than the absolute number: a backlog that keeps growing means integration
+        is falling behind; flat or declining is healthy.
       </div>
     </div>
   ),

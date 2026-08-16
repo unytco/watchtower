@@ -13,7 +13,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.use("*", async (c, next) => {
   const allowed = (c.env.ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim());
   return cors({
-    origin: (origin) => (allowed.includes(origin) ? origin : allowed[0] ?? ""),
+    origin: (origin) => (allowed.includes(origin) ? origin : (allowed[0] ?? "")),
     allowHeaders: ["content-type", "authorization"],
     allowMethods: ["GET", "POST", "OPTIONS"],
     maxAge: 600,

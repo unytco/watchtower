@@ -196,11 +196,8 @@ describe("bridge unclassified-error streak", () => {
 
   it("clears a stored streak when a later report comes back clean", async () => {
     expect(
-      (
-        await ingestBridge(
-          payload({ unclassified_active: true, unclassified_consecutive: 2 }),
-        )
-      ).status,
+      (await ingestBridge(payload({ unclassified_active: true, unclassified_consecutive: 2 })))
+        .status,
     ).toBe(200);
     expect((await readService()).unclassified_consecutive).toBe(2);
 

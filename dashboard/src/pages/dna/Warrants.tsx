@@ -1,10 +1,5 @@
 import { useOutletContext } from "react-router-dom";
-import {
-  parseProofSummary,
-  useWarrants,
-  type Warrant,
-  type WarrantProofSummary,
-} from "../../api";
+import { parseProofSummary, useWarrants, type Warrant, type WarrantProofSummary } from "../../api";
 import { relTime } from "../../lib/format";
 import { CopyableHash } from "../../components/CopyableHash";
 
@@ -40,10 +35,7 @@ export function DnaWarrants() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td
-                  className="px-3 py-6 text-center text-muted"
-                  colSpan={9}
-                >
+                <td className="px-3 py-6 text-center text-muted" colSpan={9}>
                   No warrants observed.
                 </td>
               </tr>
@@ -118,12 +110,10 @@ function ProofCell({ proof }: { proof: WarrantProofSummary | null }) {
           </div>
         )}
         <div>
-          <span className="text-muted">action:</span>{" "}
-          <CopyableHash value={proof.action_hash_b64} />
+          <span className="text-muted">action:</span> <CopyableHash value={proof.action_hash_b64} />
         </div>
         <div>
-          <span className="text-muted">by:</span>{" "}
-          <CopyableHash value={proof.action_author_b64} />
+          <span className="text-muted">by:</span> <CopyableHash value={proof.action_author_b64} />
         </div>
       </div>
     );
