@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Report degraded observer reads as `null` instead of `0` (apply D1 migration 0005 on redeploy).
 - Report degraded CLI count reads (`pending_ops_count` / `integrated_ops_count` / `nonce_duplicate_count`) as `—` (unknown) instead of `0`; CLI-only, so no D1 or dashboard change.
 - pin Rust 1.95.0 (was 1.93.1): `sqlx` 0.9 requires ≥ 1.94, and 1.95 is what holonix `main-0.7` already provides.
-- pin `ham` to an exact revision (`5bef5c2`) rather than its `main` branch, so a change to it reaches the observer only in a commit that names the new revision.
+- pin `ham` to revision `5bef5c2` rather than its `main` branch, so a change to it arrives in a commit that names it.
 - Clear the Rust 1.95 clippy warnings in the vendored `chain_doc` crate.
 - Clear the remaining Rust 1.95 clippy warnings across the workspace.
 - docs + example config follow the observer's move to the hash-explorer node (`make hash-explorer-watchtower` replaces the always-online target). Deploy mechanics unchanged.
