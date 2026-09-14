@@ -70,7 +70,7 @@ unyt_watchtower_hc_store = { path = "crates/hc_store" }
 unyt_watchtower_collector = { path = "crates/collector" }
 
 # Shared Holochain client helpers (ham = Holochain AppWebsocket/Admin helpers).
-ham = { git = "https://github.com/unytco/ham.git", rev = "5bef5c239dec3fd26cfbc472d73b78f0c1ce8831" }
+ham = { git = "https://github.com/unytco/ham.git", rev = "d59abb331810d4b4ff0655d4469ef1047fc71a5d" }
 
 [profile.release]
 lto = "thin"
