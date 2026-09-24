@@ -116,6 +116,7 @@ refused "a D1 without the schema" "Counting rows failed"
 
 wipe "$DNA_A" <<<"no"
 refused "answered no" "Not confirmed"
+check "the prompt shows without a terminal" true "$(says "Type the DNA hash or 'yes'")"
 wipe "$DNA_A" <<<"$DNA_B"
 refused "answered with another DNA" "Not confirmed"
 wipe "$DNA_A" </dev/null
