@@ -14,8 +14,11 @@ DNA_A="hC0k$(printf 'a%.0s' {1..48})"
 DNA_B="hC0k$(printf 'b%.0s' {1..48})"
 ROWS_PER_DNA=6
 
-persist="$(mktemp -d)"
-trap 'rm -rf "$persist"' EXIT
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+persist="${scratch}/d1"
+unmigrated="${scratch}/unmigrated"
+mkdir "$persist" "$unmigrated"
 
 d1() {
   wrangler_in "$WORKER_DIR" d1 execute watchtower --local --persist-to "$persist" "$@"
@@ -59,10 +62,16 @@ check() {
   fi
 }
 
-# Runs wipe-dna.sh against the scratch D1, leaving its exit code in `rc` and output in `out`.
-wipe() {
+# Runs wipe-dna.sh against the local D1 in $1, leaving its exit code in `rc` and output in `out`.
+wipe_in() {
+  local dir="$1"
+  shift
   rc=0
-  out="$(bash "${SCRIPT_DIR}/wipe-dna.sh" --persist-to "$persist" "$@" 2>&1)" || rc=$?
+  out="$(bash "${SCRIPT_DIR}/wipe-dna.sh" --persist-to "$dir" "$@" 2>&1)" || rc=$?
+}
+
+wipe() {
+  wipe_in "$persist" "$@"
 }
 
 says() {
@@ -89,12 +98,16 @@ check "seeded DNA A" "$ROWS_PER_DNA" "$(rows_of "$DNA_A")"
 check "seeded DNA B" "$ROWS_PER_DNA" "$(rows_of "$DNA_B")"
 
 rejects "no DNA" "Missing DNA hash"
-rejects "SQL in the DNA" "Not a DNA hash" "hC0k'; DELETE FROM warrants; --"
+injection="hC0k' OR 1=1 OR '"
+rejects "SQL in a DNA-length argument" "Not a DNA hash" "${injection}${DNA_A:${#injection}}"
 rejects "one char short" "Not a DNA hash" "${DNA_A:0:51}"
 rejects "non-ASCII char" "Not a DNA hash" "${DNA_A:0:51}é"
 rejects "agent hash" "Not a DNA hash" "hCAk${DNA_A:4}"
 rejects "two DNAs" "One DNA hash per run" "$DNA_A" "$DNA_B"
 check "rejected runs deleted nothing" "$ROWS_PER_DNA $ROWS_PER_DNA" "$(rows_of "$DNA_A") $(rows_of "$DNA_B")"
+
+wipe_in "$unmigrated" "$DNA_A" </dev/null
+refused "D1 without the schema" "Counting rows failed"
 
 wipe "$DNA_A" <<<"no"
 refused "declined prompt" "Not confirmed"
