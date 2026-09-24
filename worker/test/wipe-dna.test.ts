@@ -3,11 +3,13 @@ import { beforeAll, describe, expect, it } from "vitest";
 import wipeTemplate from "../../scripts/wipe-dna.sql?raw";
 import { evaluate } from "../src/alerts";
 
-// DNA_B differs from DNA_A only where LIKE would not notice: A's `_` and the case of one letter.
 const DNA_A = `hC0k${"x".repeat(23)}_Mixed-${"y".repeat(18)}`;
-const DNA_B = `hC0k${"x".repeat(23)}zmixed-${"y".repeat(18)}`;
 const OP_A = "op-hash-a";
-const OP_B = "op-hash-b";
+// Each differs from DNA_A only where LIKE would not notice: the case of one letter, or A's `_`.
+const OTHER_DNAS = [
+  `hC0k${"x".repeat(23)}_mixed-${"y".repeat(18)}`,
+  `hC0k${"x".repeat(23)}zMixed-${"y".repeat(18)}`,
+];
 const LONG_AGO = "2000-01-01T00:00:00.000Z";
 
 let serial = 0;
@@ -42,12 +44,18 @@ async function dnaTables(): Promise<string[]> {
   return results.map((r) => r.name);
 }
 
-async function seedRow(table: string, values: Record<string, string | number>) {
+/** `shared` fills unset TEXT columns with their column name, so every DNA's rows agree on them. */
+async function seedRow(
+  table: string,
+  values: Record<string, string | number>,
+  { shared = false } = {},
+) {
   const { results: columns } = await env.DB.prepare("SELECT name, type FROM pragma_table_info(?)")
     .bind(table)
     .all<{ name: string; type: string }>();
+  const filler = (name: string) => (shared ? name : `${table}.${name}.${serial++}`);
   const row = columns.map(({ name, type }) =>
-    name in values ? values[name] : type === "TEXT" ? `${table}.${name}.${serial++}` : 0,
+    name in values ? values[name] : type === "TEXT" ? filler(name) : 0,
   );
   await env.DB.prepare(
     `INSERT INTO ${table} (${columns.map((c) => c.name).join(", ")})
@@ -57,22 +65,27 @@ async function seedRow(table: string, values: Record<string, string | number>) {
     .run();
 }
 
-/**
- * One row of `dna` in every table with a dna_b64 column, plus a warrant seen by two
- * observers. Its expired chain lock and backlog bucket, with the warrant, trip the
- * alert rules, so `evaluate` writes entity keys in each DNA-bearing shape.
- */
+// The fresh warrant, the expired chain lock and the backlog bucket trip the alert rules,
+// so `evaluate` writes an entity key in each DNA-bearing shape.
 async function seedDna(dna: string, opHash: string) {
   for (const table of await dnaTables()) {
     const values: Record<string, string | number> = { dna_b64: dna };
-    if (table === "warrants") values.op_hash_b64 = opHash;
+    if (table === "warrants") {
+      values.op_hash_b64 = opHash;
+      values.first_seen_at = new Date().toISOString();
+    }
     if (table === "chain_locks") values.expires_at_iso = LONG_AGO;
     if (table === "derived_metrics_ts") values.pending_backlog = 1;
-    await seedRow(table, values);
+    if (table === "bridge_services" || table === "bridge_backlog") values.observer_id = dna;
+    await seedRow(table, values, { shared: true });
   }
   await seedRow("warrant_sightings", { op_hash_b64: opHash, observer_id: "obs-1" });
   await seedRow("warrant_sightings", { op_hash_b64: opHash, observer_id: "obs-2" });
   await evaluate(env);
+}
+
+async function wipedTables(): Promise<string[]> {
+  return [...(await dnaTables()), "alert_incidents", "warrant_sightings"].sort();
 }
 
 async function snapshot(): Promise<Record<string, string[]>> {
@@ -98,7 +111,7 @@ describe("scripts/wipe-dna.sql", () => {
     await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
   });
 
-  it("removes every row of the target DNA and leaves every other row as it was", async () => {
+  it("removes the DNA's rows from the wiped tables and leaves every other row as it was", async () => {
     for (const kind of [
       "new_warrant",
       "pending_backlog",
@@ -116,25 +129,28 @@ describe("scripts/wipe-dna.sql", () => {
       if (table === "alert_rules" || table === "alert_incidents") continue;
       await seedRow(table, table === "observers" ? { last_seen_iso: LONG_AGO } : {});
     }
-    await seedDna(DNA_B, OP_B);
-    const withoutA = await snapshot();
+    for (const [i, dna] of OTHER_DNAS.entries()) await seedDna(dna, `op-hash-other-${i}`);
+    await seedRow("blocks", {
+      target_id: `Cell(CellId(DnaHash(u${DNA_A}), AgentPubKey(uhCAk${"a".repeat(48)})))`,
+    });
+    await seedRow("analysis_runs", { result_json: JSON.stringify([{ op_hash_b64: OP_A }]) });
+    const expected = await snapshot();
 
     await seedDna(DNA_A, OP_A);
     const withA = await snapshot();
-    for (const table of [...(await dnaTables()), "warrant_sightings"]) {
-      expect(withA[table].length, table).toBeGreaterThan(withoutA[table].length);
+    for (const table of await wipedTables()) {
+      expect(withA[table].length, table).toBeGreaterThan(expected[table].length);
     }
     expect(await incidentKeysMentioning(DNA_A, OP_A)).toHaveLength(3);
 
     await wipe(DNA_A);
 
-    expect(await snapshot()).toEqual(withoutA);
-    expect(await incidentKeysMentioning(DNA_B, OP_B)).toHaveLength(3);
+    expect(await snapshot()).toEqual(expected);
   });
 
-  it("has a DELETE for every table with a dna_b64 column", async () => {
+  it("deletes from every table with a dna_b64 column and the two reached through warrants", async () => {
     const targeted = wipeStatements(DNA_A).map((sql) => sql.split(" ")[2]);
-    expect(targeted).toEqual(expect.arrayContaining(await dnaTables()));
+    expect(targeted.sort()).toEqual(await wipedTables());
   });
 
   it("keeps each statement on one line, the shape the script's preview is derived from", () => {

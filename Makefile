@@ -49,7 +49,9 @@ secrets: ## Interactively set Worker secrets (RESEND_API_KEY, ALERT_FROM_ADDRESS
 seed-alerts: ## Provision default alert rules (override with WORKER_URL / RECIPIENT env vars)
 	bash $(SCRIPTS)/seed-alert-rules.sh
 
-wipe-dna: ## Delete one DNA's rows from D1: DNA=<hash>, LOCAL=1 for the local D1, YES=1 skips the prompt
+wipe-dna: ## Delete one DNA's rows from the remote D1: DNA=<hash>, LOCAL=1 for the local one, YES=1 skips the prompt
+	$(if $(filter command line,$(origin DNA)),,$(error Pass the hash as make wipe-dna DNA=<hash>))
+	$(if $(filter-out 0 1,$(LOCAL) $(YES)),$(error LOCAL and YES take 0 or 1))
 	bash $(SCRIPTS)/wipe-dna.sh $(if $(filter 1,$(LOCAL)),--local) $(if $(filter 1,$(YES)),--yes) "$$DNA"
 
 status: ## Show recent Worker + Pages deployments

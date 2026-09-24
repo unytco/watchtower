@@ -7,13 +7,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: scripts/wipe-dna.sh [--local [--persist-to DIR]] [--yes] <dna-hash>
+Usage: scripts/wipe-dna.sh [--local | --persist-to DIR] [--yes] <dna-hash>
 
-Deletes every row of one DNA from the D1 database `watchtower`, remote unless --local.
+Deletes one DNA's rows from the D1 database `watchtower`, remote unless --local or --persist-to.
 
   <dna-hash>        uhC0k… (53 chars) or hC0k… (52 chars)
   --local           use the local D1 that `wrangler dev` uses
-  --persist-to DIR  use the local D1 state under DIR (implies --local)
+  --persist-to DIR  use the local D1 state under DIR
   --yes             skip the confirmation prompt
 EOF
   exit "$1"
@@ -27,7 +27,10 @@ while (($#)); do
   case "$1" in
     --local) local_mode=true ;;
     --persist-to)
-      [[ $# -ge 2 ]] || usage 1
+      if [[ $# -lt 2 ]]; then
+        err "--persist-to needs a directory."
+        usage 1
+      fi
       local_mode=true
       persist_to="$2"
       shift
@@ -55,7 +58,7 @@ if [[ -z "$dna_arg" ]]; then
 fi
 
 is_dna_hash() {
-  # In a UTF-8 locale [A-Za-z] also matches letters such as é.
+  # In locales such as en_US.UTF-8, [A-Za-z] also matches letters such as é.
   local LC_ALL=C
   [[ "$1" =~ ^hC0k[A-Za-z0-9_-]{48}$ ]]
 }
@@ -86,7 +89,8 @@ d1() {
   wrangler_in "$WORKER_DIR" d1 execute watchtower "${target[@]}" "$@"
 }
 
-statements="$(sed "s/__DNA__/${dna}/g" "${SCRIPT_DIR}/wipe-dna.sql" | grep -Ev '^[[:space:]]*(--|$)')"
+template="$(grep -Ev '^[[:space:]]*(--|$)' "${SCRIPT_DIR}/wipe-dna.sql")"
+statements="${template//__DNA__/$dna}"
 n_statements="$(wc -l <<<"$statements")"
 # One scalar subquery per table: D1 caps a compound SELECT below the number of tables.
 counts="$(sed -nE 's/^DELETE FROM ([a-z_]+) WHERE (.+);$/(SELECT COUNT(*) FROM \1 WHERE \2) AS \1/p' <<<"$statements")"
@@ -94,18 +98,14 @@ if [[ "$(wc -l <<<"$counts")" -ne "$n_statements" ]]; then
   err "scripts/wipe-dna.sql: every statement must be one line of the form 'DELETE FROM <table> WHERE …;'"
   exit 1
 fi
-counts_sql="SELECT $(paste -sd, <<<"$counts");"
+counts_sql="SELECT $(paste -sd, - <<<"$counts");"
 
-# Sets `total` and the printable `per_table` counts.
 count_rows() {
-  local json
-  if ! json="$(d1 --json --command "$counts_sql")"; then
-    err "Counting rows failed:"
-    echo "$json" >&2
-    exit 1
-  fi
-  if [[ "$(jq '.[0].results[0] | length' <<<"$json")" -ne "$n_statements" ]]; then
-    err "Unexpected wrangler output:"
+  local failure="$1" json
+  if ! json="$(d1 --json --command "$counts_sql")" ||
+    ! jq -e --argjson n "$n_statements" \
+      '.[0].results[0] | length == $n and all(.[]; type == "number")' <<<"$json" >/dev/null 2>&1; then
+    err "${failure}. Wrangler said:"
     echo "$json" >&2
     exit 1
   fi
@@ -115,18 +115,19 @@ count_rows() {
 }
 
 log "Rows for DNA ${dna} in ${target_desc}:"
-count_rows
+count_rows "Counting rows failed. Nothing deleted"
 echo "$per_table"
 if ((total == 0)); then
-  log "Nothing to delete: no rows for this DNA."
+  log "Nothing to delete: no rows for this DNA in ${target_desc}."
   exit 0
 fi
 
 if ! $assume_yes; then
   answer=""
-  read -r -p "Type the DNA hash or 'yes' to delete these ${total} rows from ${target_desc}: " answer || true
-  if [[ "$answer" != "yes" && "$answer" != "$dna" && "$answer" != "$dna_arg" ]]; then
-    err "Not confirmed. Nothing deleted."
+  printf "Type the DNA hash or 'yes' to delete these %s rows from %s: " "$total" "$target_desc" >&2
+  read -r answer || true
+  if [[ "$answer" != "yes" && "${answer#u}" != "$dna" ]]; then
+    err "Not confirmed. Nothing deleted. Scripted runs pass --yes (make: YES=1)."
     exit 1
   fi
 fi
@@ -135,18 +136,20 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 printf '%s\n' "$statements" >"${tmp_dir}/wipe-dna.sql"
 
-log "Deleting ${total} rows..."
-d1 --yes --file "${tmp_dir}/wipe-dna.sql"
+log "Deleting..."
+if ! d1 --yes --file "${tmp_dir}/wipe-dna.sql"; then
+  err "The delete on ${target_desc} failed. Re-run to see which rows remain."
+  exit 1
+fi
 
-count_rows
+count_rows "The delete ran but recounting failed. Re-run to see which rows remain"
 if ((total)); then
   err "${total} rows remain for DNA ${dna}:"
   echo "$per_table" >&2
 else
-  log "No rows left for DNA ${dna}."
+  log "No rows left for DNA ${dna} in the tables above."
 fi
-warn "Observers still running this DNA re-create its rows on their next post."
-warn "The wipe only lasts for a DNA the fleet no longer runs."
+warn "Observers and bridge reporters still on this DNA re-create its rows on their next post: the wipe lasts only once the fleet no longer runs it."
 if ((total)); then
   exit 1
 fi
