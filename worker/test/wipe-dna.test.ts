@@ -42,7 +42,6 @@ async function dnaTables(): Promise<string[]> {
   return results.map((r) => r.name);
 }
 
-/** Inserts one row, filling every column not in `values` with a unique placeholder. */
 async function seedRow(table: string, values: Record<string, string | number>) {
   const { results: columns } = await env.DB.prepare("SELECT name, type FROM pragma_table_info(?)")
     .bind(table)

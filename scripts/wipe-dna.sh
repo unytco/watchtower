@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-#
-# Delete every row of one DNA from the D1 database `watchtower`: show the
-# per-table row counts, ask for confirmation, then run scripts/wipe-dna.sql.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
