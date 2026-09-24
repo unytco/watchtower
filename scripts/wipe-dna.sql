@@ -7,8 +7,8 @@
 -- Left alone on purpose:
 --   cap_grants: its cell_b64 is always empty.
 --   analysis_runs: each row is a cron snapshot across every DNA, holding op hashes only.
---   blocks: node-scoped; a cell block names the DNA inside target_id, but the conductor never
---   drops its block spans, so observers re-post them whether or not the DNA still runs.
+--   blocks: node-scoped; a cell block names the DNA inside target_id, but the conductor keeps a
+--   cell's block spans after its app is uninstalled, so observers re-post them either way.
 DELETE FROM alert_incidents WHERE instr(entity_key, ':__DNA__:') > 0 OR entity_key IN (SELECT op_hash_b64 FROM warrants WHERE dna_b64 = '__DNA__');
 DELETE FROM warrant_sightings WHERE op_hash_b64 IN (SELECT op_hash_b64 FROM warrants WHERE dna_b64 = '__DNA__');
 DELETE FROM warrants WHERE dna_b64 = '__DNA__';

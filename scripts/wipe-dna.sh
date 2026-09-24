@@ -118,7 +118,7 @@ log "Rows for DNA ${dna} in ${target_desc}:"
 count_rows "Counting rows failed. Nothing deleted"
 echo "$per_table"
 if ((total == 0)); then
-  log "Nothing to delete: no rows for this DNA in ${target_desc}."
+  log "Nothing to delete: no rows for this DNA in the tables above."
   exit 0
 fi
 

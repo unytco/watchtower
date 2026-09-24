@@ -102,11 +102,11 @@ check "seeded three DNAs" "$all_seeded" "$(rows_of_all)"
 rejects "no DNA" "Missing DNA hash"
 pad() { echo "$1${DNA_A:${#1}}"; }
 rejects "a quote" "Not a DNA hash" "$(pad "hC0k' OR 1=1 OR '")"
-rejects "sed syntax" "Not a DNA hash" "$(pad "hC0k/;s/WHERE /WHERE 1 OR /;#")"
+rejects "SQL and sed syntax without a quote" "Not a DNA hash" "$(pad "hC0k/;s/WHERE /WHERE 1 OR /;#")"
 rejects "an ampersand" "Not a DNA hash" "$(pad "hC0k&")"
 rejects "a backslash" "Not a DNA hash" "$(pad "hC0k\\")"
 rejects "one char short" "Not a DNA hash" "${DNA_A:0:51}"
-rejects "a non-ASCII letter" "Not a DNA hash" "${DNA_A:0:51}é"
+LC_ALL=en_US.UTF-8 rejects "a non-ASCII letter" "Not a DNA hash" "${DNA_A:0:51}é"
 rejects "an agent hash" "Not a DNA hash" "hCAk${DNA_A:4}"
 rejects "two DNAs" "One DNA hash per run" "$DNA_A" "$DNA_B"
 check "rejected runs deleted nothing" "$all_seeded" "$(rows_of_all)"
@@ -161,32 +161,47 @@ check "--yes skips the prompt" "0 0" "$rc $(rows_of "$DNA_C")"
 check "DNA B survived every run" "$ROWS_PER_DNA" "$(rows_of "$DNA_B")"
 
 n_tables="$(grep -c '^DELETE FROM' "${SCRIPT_DIR}/wipe-dna.sql")"
+# The shim answers wrangler's nth call with the nth argument of `shim`, and logs each call.
 cat >"${shim_bin}/pnpm" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$SHIM_LOG"
-echo "$SHIM_JSON"
+n="$(wc -l <"$SHIM_LOG")"
+sed -n "${n}p" "$SHIM_REPLIES"
 EOF
 chmod +x "${shim_bin}/pnpm"
-export SHIM_LOG="${scratch}/pnpm.log"
+export SHIM_LOG="${scratch}/pnpm.log" SHIM_REPLIES="${scratch}/pnpm.replies"
 shim() {
-  local json="$1"
+  local replies=()
+  while [[ "$1" != -- ]]; do
+    replies+=("$1")
+    shift
+  done
   shift
+  printf '%s\n' "${replies[@]}" >"$SHIM_REPLIES"
   : >"$SHIM_LOG"
   rc=0
-  out="$(PATH="${shim_bin}:$PATH" SHIM_JSON="$json" bash "${SCRIPT_DIR}/wipe-dna.sh" "$@" 2>&1 </dev/null)" || rc=$?
+  out="$(PATH="${shim_bin}:$PATH" bash "${SCRIPT_DIR}/wipe-dna.sh" "$@" 2>&1 </dev/null)" || rc=$?
 }
-zero_counts="[{\"results\":[{$(seq -s, -f '"t%g":0' 1 "$n_tables")}],\"success\":true}]"
+counts_of() {
+  echo "[{\"results\":[{$(seq -s, -f "\"t%g\":$1" 1 "$n_tables")}],\"success\":true}]"
+}
 logged() {
   grep -q -- "$1" "$SHIM_LOG" && echo true || echo false
 }
 
-shim "$zero_counts" "$DNA_A"
+shim "$(counts_of 0)" -- "$DNA_A"
 check "no flag targets remote" "true false remote" "$(logged --remote) $(logged --local) $(says "remote D1" | sed 's/true/remote/')"
-shim "$zero_counts" --local "$DNA_A"
+shim "$(counts_of 0)" -- --local "$DNA_A"
 check "--local targets local" "false true local" "$(logged --remote) $(logged --local) $(says "local D1" | sed 's/true/local/')"
-shim '[{"results":[{"t1":0}],"success":true}]' --yes "$DNA_A"
-refused "unexpected wrangler output" "Counting rows failed"
-check "unexpected wrangler output: never deletes" false "$(logged --file)"
+shim '[{"results":[{"t1":5}],"success":true}]' -- --yes "$DNA_A"
+refused "a count of the wrong width" "Counting rows failed"
+check "a count of the wrong width: never deletes" false "$(logged --file)"
+shim "$(counts_of 1 | sed 's/"t1":1/"t1":null/')" -- --yes "$DNA_A"
+refused "a count that is not a number" "Counting rows failed"
+check "a count that is not a number: never deletes" false "$(logged --file)"
+shim "$(counts_of 1)" '[]' 'not json' -- --yes "$DNA_A"
+refused "a failed recount" "recounting failed"
+check "a failed recount: the delete ran" true "$(logged --file)"
 
 make_n() {
   rc=0
@@ -199,6 +214,11 @@ make_n DNA=x YES=0 LOCAL=0
 check "make YES=0 LOCAL=0 targets remote and prompts" "0 \"\$DNA\"" "$rc $out"
 make_n DNA=x LOCAL=true
 check "make LOCAL=true is refused" "2 true" "$rc $(says "LOCAL and YES take 0 or 1")"
+for v in LOCAL YES; do
+  rc=0
+  out="$(env "${v}=1" make -s -n -C "$REPO_ROOT" wipe-dna DNA=x 2>&1)" || rc=$?
+  check "make with ${v} only in the environment is refused" "2 true" "$rc $(says "Pass ${v} on the make command line")"
+done
 rc=0
 out="$(DNA=x make -s -n -C "$REPO_ROOT" wipe-dna 2>&1)" || rc=$?
 check "make with DNA only in the environment is refused" "2 true" "$rc $(says "DNA=<hash>")"

@@ -51,6 +51,7 @@ seed-alerts: ## Provision default alert rules (override with WORKER_URL / RECIPI
 
 wipe-dna: ## Delete one DNA's rows from the remote D1: DNA=<hash>, LOCAL=1 for the local one, YES=1 skips the prompt
 	$(if $(filter command line,$(origin DNA)),,$(error Pass the hash as make wipe-dna DNA=<hash>))
+	$(foreach v,LOCAL YES,$(if $(filter environment%,$(origin $v)),$(error Pass $v on the make command line)))
 	$(if $(filter-out 0 1,$(LOCAL) $(YES)),$(error LOCAL and YES take 0 or 1))
 	bash $(SCRIPTS)/wipe-dna.sh $(if $(filter 1,$(LOCAL)),--local) $(if $(filter 1,$(YES)),--yes) "$$DNA"
 
