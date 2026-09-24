@@ -58,6 +58,7 @@ if [[ -z "$dna_arg" ]]; then
 fi
 
 is_dna_hash() {
+  # In a UTF-8 locale [A-Za-z] also matches letters such as é.
   local LC_ALL=C
   [[ "$1" =~ ^hC0k[A-Za-z0-9_-]{48}$ ]]
 }
