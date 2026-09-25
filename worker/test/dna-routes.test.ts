@@ -1,6 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import schemaSql from "../src/schema.sql?raw";
+import { applySql } from "./helpers";
 
 const DNA_A = "dna-alpha";
 const DNA_B = "dna-beta";
@@ -9,23 +10,6 @@ const OBS_Y = "obs-y";
 const AGENT_1 = "agent-1";
 const AGENT_2 = "agent-2";
 const AGENT_3 = "agent-3";
-
-async function applySchema() {
-  // D1's exec() requires each statement on a single line terminated by `;`.
-  // Strip comments, collapse whitespace inside each statement, then feed the
-  // whole file as a single exec call.
-  const stripped = schemaSql
-    .split("\n")
-    .filter((line: string) => !line.trim().startsWith("--"))
-    .join("\n");
-  const singleLine = stripped
-    .split(/;\s*\n/)
-    .map((s: string) => s.replace(/\s+/g, " ").trim())
-    .filter((s: string) => s.length > 0)
-    .map((s: string) => `${s};`)
-    .join("\n");
-  await env.DB.exec(singleLine);
-}
 
 async function seed() {
   const now = new Date().toISOString();
@@ -126,7 +110,7 @@ async function seed() {
 
 describe("DNA-scoped routes", () => {
   beforeAll(async () => {
-    await applySchema();
+    await applySql(schemaSql);
     await seed();
   });
 
