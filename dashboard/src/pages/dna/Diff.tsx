@@ -60,12 +60,10 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Warrants",
     help: (
       <div className="space-y-1.5">
-        <div>
-          An observer sighted a warrant op it hadn't seen before, or a known one's validation moved
-          on.
-        </div>
+        <div>An observer saw a warrant op it hadn't seen before.</div>
         <div className="text-muted">
-          Warrants are append-only on the DHT, so seeing a known warrant again does not count.
+          Observers report only integrated warrants, whose recorded fields never change, so seeing a
+          known warrant again does not count.
         </div>
       </div>
     ),
@@ -103,7 +101,8 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
       <div className="space-y-1.5">
         <div>A cell scheduled a new zome call, or an existing one's next run moved.</div>
         <div className="text-muted">
-          A recurring schedule's next run moves each time it fires, so it counts again on every run.
+          A recurring schedule's next run moves each time it fires, so it counts once in any window
+          where it fired.
         </div>
       </div>
     ),
@@ -112,7 +111,7 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Slice hashes",
     help: (
       <div className="space-y-1.5">
-        <div>An observer published a new DHT arc slice hash.</div>
+        <div>An observer reported a new or changed DHT arc slice hash.</div>
         <div className="text-muted">
           These summarise what each observer believes its arc looks like.
         </div>
@@ -125,7 +124,8 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
       <div className="space-y-1.5">
         <div>A per-agent chain summary appeared, or its action count changed.</div>
         <div className="text-muted">
-          Usually means that agent authored more actions since the last snapshot.
+          Usually means that agent authored more actions, or the observer caught up on ones it
+          already had.
         </div>
       </div>
     ),
@@ -134,7 +134,7 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Capability grants",
     help: (
       <div className="space-y-1.5">
-        <div>A capability grant was issued or updated on this node.</div>
+        <div>An observer's node issued or updated a capability grant.</div>
         <div className="text-muted">
           Node-scoped: the schema doesn't carry a DNA column here, so the count covers every
           observer's node.
