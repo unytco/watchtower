@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Activity tab counts only new or changed rows, apart from DNAs seen.
 - D1 migration `0006_bridge_unclassified_streak.sql`: `bridge_services` gains `unclassified_active` and `unclassified_consecutive` (INTEGER, default 0). Apply on redeploy.
 - dashboard API contract: `GET /api/dnas/:dna/bridge` service rows gain `unclassified_active` / `unclassified_consecutive` (the bridge's unclassified-error streak, twin of the pressure pair), and the bridge status badge gains an `unclassified cooldown` state. Bridge ingest stays on schema v1 — a reporter predating the fields omits them and reads as "no streak", so worker and bridge need not be redeployed in lockstep. No alert rule consumes either streak pair yet; both are dashboard + API surfaces today.
 - upgrade Holochain to 0.7 — `crates/hc_store` is rewritten off its vendored diesel schema onto `holochain_data` + sqlx; the data-layer API is now async.

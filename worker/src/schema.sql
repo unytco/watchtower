@@ -1,10 +1,13 @@
 -- unyt-watchtower D1 schema.
 --
 -- Design rules:
--- - Latest-state upsert tables keep the DB size bounded; every table has
---   `updated_at` so the diff endpoint can answer "what changed since X?".
+-- - Latest-state upsert tables keep the DB size bounded. `updated_at` moves
+--   only when a row is new or its content changes, so the diff endpoint can
+--   answer "what changed since X?". dnas_seen is the exception: its last-seen
+--   is content, so it moves on every post.
 -- - A single timeseries table powers sparklines (30-day retention via cron).
--- - `ingest_nonces` and `alert_incidents` grow but are trimmed by cron.
+-- - snapshots, warrant_sightings and analysis_runs are unused: nothing reads
+--   or writes them.
 -- - No raw chain bodies, no op blobs, no full warrants proofs.
 
 -- ------------------------------------------------------------------
@@ -22,8 +25,6 @@ CREATE TABLE IF NOT EXISTS observers (
   binary_version        TEXT
 );
 
--- Metadata-only per-snapshot log. No body is stored; we only need "when did
--- X post?" for the health/downtime detector and to compute diffs cheaply.
 CREATE TABLE IF NOT EXISTS snapshots (
   observer_id           TEXT NOT NULL,
   collected_at          TEXT NOT NULL,
@@ -90,7 +91,6 @@ CREATE INDEX IF NOT EXISTS idx_warrants_author ON warrants (author_b64);
 CREATE INDEX IF NOT EXISTS idx_warrants_target ON warrants (target_b64);
 CREATE INDEX IF NOT EXISTS idx_warrants_updated ON warrants (updated_at);
 
--- How many observers have seen the same warrant op.
 CREATE TABLE IF NOT EXISTS warrant_sightings (
   op_hash_b64           TEXT NOT NULL,
   observer_id           TEXT NOT NULL,
@@ -248,9 +248,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_incidents_open
   ON alert_incidents (rule_id, entity_key)
   WHERE state = 'open';
 
--- ------------------------------------------------------------------
--- Cross-observer analysis, written by the 5-min cron
--- ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS analysis_runs (
   id                    TEXT PRIMARY KEY,
   kind                  TEXT NOT NULL,

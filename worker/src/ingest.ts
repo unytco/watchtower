@@ -25,7 +25,7 @@ export function readIngestHeaders(req: Request): IngestHeaders {
 export async function verifyAndParse(
   req: Request,
   env: Env,
-): Promise<{ payload: IngestPayload; rawBytes: number } | Response> {
+): Promise<{ payload: IngestPayload } | Response> {
   const headers = readIngestHeaders(req);
   if (
     !headers.schemaVersion ||
@@ -109,7 +109,7 @@ export async function verifyAndParse(
     }
   }
 
-  return { payload, rawBytes: buf.byteLength };
+  return { payload };
 }
 
 async function fetchObserverSecret(env: Env, observerId: string): Promise<string | null> {

@@ -26,7 +26,7 @@ app.post("/ingest", async (c) => {
   const parsed = await verifyAndParse(c.req.raw, c.env);
   if (parsed instanceof Response) return parsed;
   try {
-    await persist(c.env, parsed.payload, parsed.rawBytes);
+    await persist(c.env, parsed.payload);
   } catch (e) {
     console.error("persist failed", e);
     return c.text("persist failed", 500);

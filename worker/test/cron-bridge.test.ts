@@ -75,8 +75,6 @@ async function seed() {
 
 describe("scheduled cron bridge trims", () => {
   beforeEach(async () => {
-    // Clean slate between cases so the alert/cross-observer side
-    // effects from `scheduled` don't leak state.
     await env.DB.exec("DROP TABLE IF EXISTS bridge_services;");
     await env.DB.exec("DROP TABLE IF EXISTS bridge_backlog;");
     await env.DB.exec("DROP TABLE IF EXISTS bridge_throughput_ts;");
@@ -92,7 +90,20 @@ describe("scheduled cron bridge trims", () => {
     expect(results.map((r) => r.observer_id)).toEqual([OBS_FRESH]);
   });
 
-  it("drops stale bridge_backlog rows older than 14 days", async () => {
+  it("drops the backlog of a reporter whose service row expired", async () => {
+    await scheduled(env);
+    const { results } = await env.DB.prepare(
+      "SELECT observer_id FROM bridge_backlog ORDER BY observer_id",
+    ).all<{ observer_id: string }>();
+    expect(results.map((r) => r.observer_id)).toEqual([OBS_FRESH]);
+  });
+
+  it("keeps a live reporter's backlog whose numbers have not changed for 14 days", async () => {
+    await env.DB.prepare(
+      "UPDATE bridge_backlog SET collected_at = ?, updated_at = ? WHERE observer_id = ?",
+    )
+      .bind(isoDaysAgo(20), isoDaysAgo(20), OBS_FRESH)
+      .run();
     await scheduled(env);
     const { results } = await env.DB.prepare(
       "SELECT observer_id FROM bridge_backlog ORDER BY observer_id",

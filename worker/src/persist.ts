@@ -1,344 +1,212 @@
 import type { Env, IngestPayload, DnaSnapshot } from "./types";
+import { hourlyBucket, upsertIfChanged } from "./write";
 
-/// Apply a verified ingest payload by upserting into the latest-state tables
-/// and appending to the hourly timeseries.
-export async function persist(env: Env, payload: IngestPayload, rawBytes: number): Promise<void> {
+export async function persist(env: Env, payload: IngestPayload): Promise<void> {
   const { observer_id, collected_at, self_health, node } = payload;
+  const db = env.DB;
+  const updated_at = collected_at;
 
-  const batch: D1PreparedStatement[] = [];
-
-  batch.push(
-    env.DB.prepare(
-      `INSERT INTO observers (observer_id, last_seen_iso, last_collection_ms, uptime_s,
-                              schema_version, n_errors, is_healthy, binary_version)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-       ON CONFLICT(observer_id) DO UPDATE SET
-         last_seen_iso = excluded.last_seen_iso,
-         last_collection_ms = excluded.last_collection_ms,
-         uptime_s = excluded.uptime_s,
-         schema_version = excluded.schema_version,
-         n_errors = excluded.n_errors,
-         is_healthy = 1,
-         binary_version = excluded.binary_version`,
-    ).bind(
-      observer_id,
-      collected_at,
-      self_health.last_collection_ms,
-      self_health.uptime_s,
-      payload.schema_version,
-      self_health.n_errors_this_cycle,
-      self_health.binary_version,
+  await db.batch([
+    upsertIfChanged(db, "observers", {
+      key: { observer_id },
+      content: {
+        last_seen_iso: collected_at,
+        last_collection_ms: self_health.last_collection_ms,
+        uptime_s: self_health.uptime_s,
+        schema_version: payload.schema_version,
+        n_errors: self_health.n_errors_this_cycle,
+        is_healthy: 1,
+        binary_version: self_health.binary_version,
+      },
+    }),
+    ...node.apps.map((app) =>
+      upsertIfChanged(db, "apps", {
+        key: { observer_id, app_id: app.app_id },
+        content: {
+          happ_name: app.happ_name,
+          role_name: app.role_name,
+          clone_of_app_id: app.clone_of_app_id ?? null,
+        },
+        stamp: { updated_at },
+      }),
     ),
-  );
-
-  batch.push(
-    env.DB.prepare(
-      "INSERT OR REPLACE INTO snapshots (observer_id, collected_at, schema_version, bytes) VALUES (?, ?, ?, ?)",
-    ).bind(observer_id, collected_at, payload.schema_version, rawBytes),
-  );
-
-  for (const app of node.apps) {
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO apps (observer_id, app_id, happ_name, role_name, clone_of_app_id, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, app_id) DO UPDATE SET
-           happ_name = excluded.happ_name,
-           role_name = excluded.role_name,
-           clone_of_app_id = excluded.clone_of_app_id,
-           updated_at = excluded.updated_at`,
-      ).bind(
-        observer_id,
-        app.app_id,
-        app.happ_name,
-        app.role_name,
-        app.clone_of_app_id ?? null,
-        collected_at,
-      ),
-    );
-  }
-
-  for (const block of node.blocks) {
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO blocks (observer_id, target_id, reason, start_iso, end_iso, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, target_id, start_iso) DO UPDATE SET
-           reason = excluded.reason,
-           end_iso = excluded.end_iso,
-           updated_at = excluded.updated_at`,
-      ).bind(
-        observer_id,
-        block.target_id,
-        block.reason,
-        block.start_iso,
-        block.end_iso,
-        collected_at,
-      ),
-    );
-  }
-
-  for (const d of node.dnas) {
-    pushDna(env, batch, observer_id, collected_at, d);
-  }
-
-  await env.DB.batch(batch);
+    ...node.blocks.map((block) =>
+      upsertIfChanged(db, "blocks", {
+        key: { observer_id, target_id: block.target_id, start_iso: block.start_iso },
+        content: { reason: block.reason, end_iso: block.end_iso },
+        stamp: { updated_at },
+      }),
+    ),
+    ...node.dnas.flatMap((d) => dnaStatements(db, observer_id, collected_at, d)),
+  ]);
 }
 
-function pushDna(
-  env: Env,
-  batch: D1PreparedStatement[],
+function dnaStatements(
+  db: D1Database,
   observer_id: string,
   collected_at: string,
   d: DnaSnapshot,
-): void {
-  batch.push(
-    env.DB.prepare(
-      `INSERT INTO dnas_seen (observer_id, dna_b64, dna_tag, first_seen_iso, last_seen_iso, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(observer_id, dna_b64) DO UPDATE SET
-         dna_tag = excluded.dna_tag,
-         last_seen_iso = excluded.last_seen_iso,
-         updated_at = excluded.updated_at`,
-    ).bind(observer_id, d.dna_b64, d.dna_tag ?? null, collected_at, collected_at, collected_at),
-  );
+): D1PreparedStatement[] {
+  const { dna_b64 } = d;
+  const updated_at = collected_at;
+  const statements = [
+    upsertIfChanged(db, "dnas_seen", {
+      key: { observer_id, dna_b64 },
+      insertOnly: { first_seen_iso: collected_at },
+      content: { dna_tag: d.dna_tag ?? null, last_seen_iso: collected_at },
+      stamp: { updated_at },
+    }),
+  ];
 
   if (d.dna_definition) {
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO dna_definitions (observer_id, dna_b64, zomes_json, properties_json, network_seed, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, dna_b64) DO UPDATE SET
-           zomes_json = excluded.zomes_json,
-           properties_json = excluded.properties_json,
-           network_seed = excluded.network_seed,
-           updated_at = excluded.updated_at`,
-      ).bind(
-        observer_id,
-        d.dna_b64,
-        JSON.stringify(d.dna_definition.zomes),
-        d.dna_definition.properties_summary_json,
-        d.dna_definition.network_seed ?? null,
-        collected_at,
-      ),
+    statements.push(
+      upsertIfChanged(db, "dna_definitions", {
+        key: { observer_id, dna_b64 },
+        content: {
+          zomes_json: JSON.stringify(d.dna_definition.zomes),
+          properties_json: d.dna_definition.properties_summary_json,
+          network_seed: d.dna_definition.network_seed ?? null,
+        },
+        stamp: { updated_at },
+      }),
     );
   }
 
   for (const a of d.agents) {
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO agents_discovered (observer_id, dna_b64, agent_b64, agent_tag,
-                                        first_seen_iso, last_seen_iso,
-                                        action_count, warrants_issued, warrants_against,
-                                        chain_closed, opening_summary_present, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, dna_b64, agent_b64) DO UPDATE SET
-           agent_tag = excluded.agent_tag,
-           last_seen_iso = excluded.last_seen_iso,
-           action_count = excluded.action_count,
-           warrants_issued = excluded.warrants_issued,
-           warrants_against = excluded.warrants_against,
-           -- Close/Open are monotonic facts: once an observer has seen an
-           -- agent close or open, a later snapshot that read the DHT before
-           -- the op re-appeared (a transient read miss reports false) must not
-           -- clobber the stored 1 back to 0. MAX keeps the flag latched.
-           chain_closed = MAX(chain_closed, excluded.chain_closed),
-           opening_summary_present = MAX(opening_summary_present, excluded.opening_summary_present),
-           updated_at = excluded.updated_at`,
-      ).bind(
-        observer_id,
-        d.dna_b64,
-        a.agent_b64,
-        a.agent_tag ?? null,
-        a.first_seen_iso,
-        a.last_seen_iso,
-        a.action_count,
-        a.warrants_issued,
-        a.warrants_against,
-        a.chain_closed ? 1 : 0,
-        a.opening_summary_present ? 1 : 0,
-        collected_at,
-      ),
+    statements.push(
+      upsertIfChanged(db, "agents_discovered", {
+        key: { observer_id, dna_b64, agent_b64: a.agent_b64 },
+        insertOnly: { first_seen_iso: a.first_seen_iso },
+        content: {
+          agent_tag: a.agent_tag ?? null,
+          action_count: a.action_count,
+          warrants_issued: a.warrants_issued,
+          warrants_against: a.warrants_against,
+        },
+        // Close/Open are monotonic. A later snapshot whose DHT read misses the
+        // op reports false, and must not clear the flag.
+        latched: {
+          chain_closed: a.chain_closed ? 1 : 0,
+          opening_summary_present: a.opening_summary_present ? 1 : 0,
+        },
+        stamp: { last_seen_iso: a.last_seen_iso, updated_at },
+      }),
+      // Last-seen moves every post. It is written apart from the upsert so
+      // that `updated_at`, and idx_agents_updated with it, move only when the
+      // agent's counts or flags change. One keyed UPDATE per agent: a join
+      // against json_each costs D1 a row read per pair of agents.
+      db
+        .prepare(
+          `UPDATE agents_discovered SET last_seen_iso = ?4
+            WHERE observer_id = ?1 AND dna_b64 = ?2 AND agent_b64 = ?3
+              AND last_seen_iso IS NOT ?4`,
+        )
+        .bind(observer_id, dna_b64, a.agent_b64, a.last_seen_iso),
     );
   }
 
   for (const w of d.warrants) {
-    const proofJson = w.proof_summary ? JSON.stringify(w.proof_summary) : null;
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO warrants (observer_id, dna_b64, op_hash_b64, warrant_type,
-                              author_b64, target_b64, ts_iso, first_seen_at, updated_at,
-                              authored_ts_iso, integrated_ts_iso, validation_status,
-                              signature_b64, proof_summary_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, op_hash_b64) DO UPDATE SET
-           warrant_type = excluded.warrant_type,
-           authored_ts_iso = excluded.authored_ts_iso,
-           integrated_ts_iso = excluded.integrated_ts_iso,
-           validation_status = excluded.validation_status,
-           signature_b64 = excluded.signature_b64,
-           proof_summary_json = excluded.proof_summary_json,
-           updated_at = excluded.updated_at`,
-      ).bind(
-        observer_id,
-        d.dna_b64,
-        w.op_hash_b64,
-        w.warrant_type,
-        w.author_b64,
-        w.target_b64,
-        w.ts_iso,
-        collected_at,
-        collected_at,
-        w.authored_ts_iso ?? null,
-        w.integrated_ts_iso ?? null,
-        w.validation_status ?? null,
-        w.signature_b64 ?? null,
-        proofJson,
-      ),
-    );
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO warrant_sightings (op_hash_b64, observer_id, last_seen_at) VALUES (?, ?, ?)
-         ON CONFLICT(op_hash_b64, observer_id) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
-      ).bind(w.op_hash_b64, observer_id, collected_at),
+    statements.push(
+      upsertIfChanged(db, "warrants", {
+        key: { observer_id, op_hash_b64: w.op_hash_b64 },
+        insertOnly: {
+          dna_b64,
+          author_b64: w.author_b64,
+          target_b64: w.target_b64,
+          ts_iso: w.ts_iso,
+          first_seen_at: collected_at,
+        },
+        content: {
+          warrant_type: w.warrant_type,
+          authored_ts_iso: w.authored_ts_iso ?? null,
+          integrated_ts_iso: w.integrated_ts_iso ?? null,
+          validation_status: w.validation_status ?? null,
+          signature_b64: w.signature_b64 ?? null,
+          proof_summary_json: w.proof_summary ? JSON.stringify(w.proof_summary) : null,
+        },
+        stamp: { updated_at },
+      }),
     );
   }
 
   for (const cs of d.chain_summaries) {
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO chain_summaries (observer_id, dna_b64, agent_b64, action_count,
-                                      first_ts_iso, last_ts_iso, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, dna_b64, agent_b64) DO UPDATE SET
-           action_count = excluded.action_count,
-           last_ts_iso = excluded.last_ts_iso,
-           updated_at = excluded.updated_at`,
-      ).bind(
-        observer_id,
-        d.dna_b64,
-        cs.agent_b64,
-        cs.action_count,
-        cs.first_ts_iso,
-        cs.last_ts_iso,
-        collected_at,
-      ),
+    statements.push(
+      upsertIfChanged(db, "chain_summaries", {
+        key: { observer_id, dna_b64, agent_b64: cs.agent_b64 },
+        insertOnly: { first_ts_iso: cs.first_ts_iso },
+        content: { action_count: cs.action_count },
+        stamp: { last_ts_iso: cs.last_ts_iso, updated_at },
+      }),
     );
   }
 
   for (const s of d.slice_hashes) {
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO slice_hashes (observer_id, dna_b64, arc_start, arc_end, slice_index, hash_b64, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, dna_b64, arc_start, arc_end, slice_index) DO UPDATE SET
-           hash_b64 = excluded.hash_b64,
-           updated_at = excluded.updated_at`,
-      ).bind(
-        observer_id,
-        d.dna_b64,
-        s.arc_start,
-        s.arc_end,
-        s.slice_index,
-        s.hash_b64,
-        collected_at,
-      ),
+    statements.push(
+      upsertIfChanged(db, "slice_hashes", {
+        key: {
+          observer_id,
+          dna_b64,
+          arc_start: s.arc_start,
+          arc_end: s.arc_end,
+          slice_index: s.slice_index,
+        },
+        content: { hash_b64: s.hash_b64 },
+        stamp: { updated_at },
+      }),
     );
   }
 
   for (const l of d.chain_locks) {
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO chain_locks (observer_id, dna_b64, author_b64, subject_b64, expires_at_iso, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, dna_b64, author_b64, subject_b64) DO UPDATE SET
-           expires_at_iso = excluded.expires_at_iso,
-           updated_at = excluded.updated_at`,
-      ).bind(observer_id, d.dna_b64, l.author_b64, l.subject_b64, l.expires_at_iso, collected_at),
+    statements.push(
+      upsertIfChanged(db, "chain_locks", {
+        key: { observer_id, dna_b64, author_b64: l.author_b64, subject_b64: l.subject_b64 },
+        content: { expires_at_iso: l.expires_at_iso },
+        stamp: { updated_at },
+      }),
     );
   }
 
   for (const f of d.scheduled_functions) {
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO scheduled_functions (observer_id, dna_b64, author_b64, zome, fn_name, scheduled_at_iso, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, dna_b64, author_b64, zome, fn_name) DO UPDATE SET
-           scheduled_at_iso = excluded.scheduled_at_iso,
-           updated_at = excluded.updated_at`,
-      ).bind(
-        observer_id,
-        d.dna_b64,
-        f.author_b64,
-        f.zome,
-        f.fn_name,
-        f.scheduled_at_iso,
-        collected_at,
-      ),
+    statements.push(
+      upsertIfChanged(db, "scheduled_functions", {
+        key: { observer_id, dna_b64, author_b64: f.author_b64, zome: f.zome, fn_name: f.fn_name },
+        content: { scheduled_at_iso: f.scheduled_at_iso },
+        stamp: { updated_at },
+      }),
     );
   }
 
   for (const c of d.validation_coverage) {
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO validation_coverage (observer_id, dna_b64, op_hash_b64, receipt_count, updated_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, dna_b64, op_hash_b64) DO UPDATE SET
-           receipt_count = excluded.receipt_count,
-           updated_at = excluded.updated_at`,
-      ).bind(observer_id, d.dna_b64, c.op_hash_b64, c.receipt_count, collected_at),
+    statements.push(
+      upsertIfChanged(db, "validation_coverage", {
+        key: { observer_id, dna_b64, op_hash_b64: c.op_hash_b64 },
+        content: { receipt_count: c.receipt_count },
+        stamp: { updated_at },
+      }),
     );
   }
 
   for (const g of d.cap_grants) {
-    batch.push(
-      env.DB.prepare(
-        `INSERT INTO cap_grants (observer_id, app_id, cell_b64, tag, function_count, access_type, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(observer_id, app_id, cell_b64, tag) DO UPDATE SET
-           function_count = excluded.function_count,
-           access_type = excluded.access_type,
-           updated_at = excluded.updated_at`,
-      ).bind(
-        observer_id,
-        g.app_id,
-        g.cell_b64,
-        g.tag ?? "",
-        g.function_count,
-        g.access_type,
-        collected_at,
-      ),
+    statements.push(
+      upsertIfChanged(db, "cap_grants", {
+        key: { observer_id, app_id: g.app_id, cell_b64: g.cell_b64, tag: g.tag ?? "" },
+        content: { function_count: g.function_count, access_type: g.access_type },
+        stamp: { updated_at },
+      }),
     );
   }
 
-  // Hourly timeseries bucket.
-  const bucket = hourlyBucket(collected_at);
-  batch.push(
-    env.DB.prepare(
-      `INSERT INTO derived_metrics_ts (observer_id, dna_b64, bucket_hour_iso,
-                                       integration_rate, lag_p50_ms, lag_p99_ms, pending_backlog)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(observer_id, dna_b64, bucket_hour_iso) DO UPDATE SET
-         integration_rate = excluded.integration_rate,
-         lag_p50_ms = excluded.lag_p50_ms,
-         lag_p99_ms = excluded.lag_p99_ms,
-         pending_backlog = excluded.pending_backlog`,
-    ).bind(
-      observer_id,
-      d.dna_b64,
-      bucket,
-      // `?? null` so a degraded read (B107) stores SQL NULL rather than tripping
-      // on `undefined`; the columns are nullable as of migration 0005.
-      d.derived_metrics.integration_rate ?? null,
-      d.derived_metrics.lag_p50_ms ?? null,
-      d.derived_metrics.lag_p99_ms ?? null,
-      d.derived_metrics.pending_backlog ?? null,
-    ),
+  statements.push(
+    upsertIfChanged(db, "derived_metrics_ts", {
+      key: { observer_id, dna_b64, bucket_hour_iso: hourlyBucket(collected_at) },
+      content: {
+        integration_rate: d.derived_metrics.integration_rate ?? null,
+        lag_p50_ms: d.derived_metrics.lag_p50_ms ?? null,
+        lag_p99_ms: d.derived_metrics.lag_p99_ms ?? null,
+        pending_backlog: d.derived_metrics.pending_backlog ?? null,
+      },
+    }),
   );
-}
 
-function hourlyBucket(iso: string): string {
-  const d = new Date(iso);
-  d.setUTCMinutes(0, 0, 0);
-  return d.toISOString();
+  return statements;
 }
