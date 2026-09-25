@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+
+const VIEWPORT_MARGIN_PX = 8;
 
 export interface HelpTipProps {
   children: React.ReactNode;
@@ -22,10 +24,25 @@ export function HelpTip({
   const [open, setOpen] = useState(false);
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
+  const [shift, setShift] = useState(0);
   const ref = useRef<HTMLSpanElement | null>(null);
+  const popRef = useRef<HTMLSpanElement | null>(null);
   const popId = useId();
 
   const visible = open || hover || focus;
+
+  // Measured once per opening; a resize while it is open is not tracked.
+  useLayoutEffect(() => {
+    const pop = popRef.current;
+    if (!visible || !pop) {
+      setShift(0);
+      return;
+    }
+    const { left, right } = pop.getBoundingClientRect();
+    const maxRight = document.documentElement.clientWidth - VIEWPORT_MARGIN_PX;
+    if (left < VIEWPORT_MARGIN_PX) setShift(VIEWPORT_MARGIN_PX - left);
+    else if (right > maxRight) setShift(maxRight - right);
+  }, [visible]);
 
   useEffect(() => {
     if (!open) return;
@@ -77,8 +94,10 @@ export function HelpTip({
       </button>
       {visible && (
         <span
+          ref={popRef}
           role="tooltip"
           id={popId}
+          style={{ marginLeft: shift }}
           className={
             `absolute z-20 w-64 text-left ` +
             `bg-surface border border-border rounded shadow-lg p-3 ` +
