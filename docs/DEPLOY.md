@@ -14,9 +14,7 @@ Makefile targets such as `hash-explorer-watchtower`.
 You need all of these before running any `make` target:
 
 - `nix`, `pnpm`, `jq`, `curl` on your workstation.
-- A Cloudflare account with the `unyt.dev` zone already on Cloudflare (the
-  existing `automation/infra/cf-config-worker/wrangler.toml` confirms the zone
-  is in place).
+- A Cloudflare account with the `unyt.dev` zone already on Cloudflare.
 - SSH access to the target Holochain node(s) as `root`.
 
 ## Manual steps (do these first, in any order)
