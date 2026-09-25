@@ -27,12 +27,11 @@ const T1 = "2026-09-25T10:00:00.000Z";
 const T2 = "2026-09-25T10:05:00.000Z";
 const T3 = "2026-09-25T10:10:00.000Z";
 
-// A repeat observer post still writes its replay nonce (a table row and two
-// index entries), the observer's last-seen, the DNA's last-seen, and one
-// last-seen per reported agent.
-const REPEAT_OBSERVER_POST_WRITES = 3 + 1 + 1 + 2;
+// A repeat observer post still writes its replay nonce, the observer's
+// last-seen, the DNA's last-seen, and one last-seen per reported agent.
+const REPEAT_OBSERVER_POST_WRITES = 1 + 1 + 1 + 2;
 // A repeat bridge post still writes its replay nonce and the service row.
-const REPEAT_BRIDGE_POST_WRITES = 3 + 1;
+const REPEAT_BRIDGE_POST_WRITES = 1 + 1;
 
 const DEGRADED = {
   integration_rate: null,

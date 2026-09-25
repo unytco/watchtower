@@ -258,12 +258,15 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
 -- ------------------------------------------------------------------
 -- Ingest replay-protection state (10-min window)
 -- ------------------------------------------------------------------
+-- A rowid table keeps a TEXT primary key in a separate index, and D1 bills a
+-- row write per index per insert. WITHOUT ROWID and no ts index make an insert
+-- one write; the cron's ts delete scans a table that holds only the replay
+-- window.
 CREATE TABLE IF NOT EXISTS ingest_nonces (
   nonce                 TEXT PRIMARY KEY,
   observer_id           TEXT NOT NULL,
   ts                    TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_nonces_ts ON ingest_nonces (ts);
+) WITHOUT ROWID;
 
 -- ------------------------------------------------------------------
 -- Per-observer HMAC secrets (hashed) so the Worker can verify without
