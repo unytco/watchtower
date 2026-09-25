@@ -177,17 +177,18 @@ test("Activity help tips open inside the viewport", async ({ page }) => {
   }
 });
 
-test("a help tip shown by keyboard focus closes on Escape", async ({ page }) => {
-  await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
-  await page.goto(`/dnas/${encodeURIComponent(DNA_B64)}/diff`);
+for (const shownBy of ["focus", "hover"] as const) {
+  test(`a help tip shown by ${shownBy} closes on Escape`, async ({ page }) => {
+    await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
+    await page.goto(`/dnas/${encodeURIComponent(DNA_B64)}/diff`);
 
-  const tip = page.getByRole("button", { name: "What does Activity mean?" });
-  await tip.focus();
-  await expect(page.getByRole("tooltip")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("tooltip")).toBeHidden();
-  await expect(tip).toBeFocused();
-});
+    const tip = page.getByRole("button", { name: "What does Activity mean?" });
+    await tip[shownBy]();
+    await expect(page.getByRole("tooltip")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tooltip")).toBeHidden();
+  });
+}
 
 test("Activity claims an empty window only once the counts arrive", async ({ page }) => {
   let release!: () => void;

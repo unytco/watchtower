@@ -12,8 +12,7 @@ export interface HelpTipProps {
 
 /**
  * Small (i) affordance with a styled popover. Shows on hover, focus, and
- * click (the latter for touch). Escape closes it however it was shown; a
- * click pins it open until a second click or a click outside.
+ * click (the latter for touch). Escape closes it however it was shown.
  */
 export function HelpTip({
   children,
