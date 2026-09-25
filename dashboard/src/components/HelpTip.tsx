@@ -12,7 +12,8 @@ export interface HelpTipProps {
 
 /**
  * Small (i) affordance with a styled popover. Shows on hover, focus, and
- * click (the latter for touch). Closes on outside click, blur, or Escape.
+ * click (the latter for touch). Escape closes it however it was shown; a
+ * click pins it open until a second click or a click outside.
  */
 export function HelpTip({
   children,
@@ -45,20 +46,25 @@ export function HelpTip({
   }, [visible]);
 
   useEffect(() => {
+    if (!visible) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      setHover(false);
+      setFocus(false);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [visible]);
+
+  useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
       if (!ref.current) return;
       if (!ref.current.contains(e.target as Node)) setOpen(false);
     }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
     document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
+    return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
   const toggle = useCallback((e: React.MouseEvent) => {
