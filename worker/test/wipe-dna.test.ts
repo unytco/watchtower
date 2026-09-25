@@ -3,12 +3,27 @@ import { beforeAll, describe, expect, it } from "vitest";
 import wipeTemplate from "../../scripts/wipe-dna.sql?raw";
 import { evaluate } from "../src/alerts";
 
+type Warrant = [observer: string, opHash: string];
+
 const DNA_A = `hC0k${"x".repeat(23)}_Mixed-${"y".repeat(18)}`;
 const OP_A = "op-hash-a";
+const OP_SHARED = "op-hash-shared";
+const WARRANTS_A: Warrant[] = [
+  ["obs-1", OP_A],
+  ["obs-2", OP_A],
+  ["obs-1", OP_SHARED],
+];
 // Each differs from DNA_A only where LIKE would not notice: the case of one letter, or A's `_`.
 const OTHER_DNAS = [
   `hC0k${"x".repeat(23)}_mixed-${"y".repeat(18)}`,
   `hC0k${"x".repeat(23)}zMixed-${"y".repeat(18)}`,
+];
+const OTHER_WARRANTS: Warrant[][] = [
+  [
+    ["obs-1", "op-hash-other-0"],
+    ["obs-2", OP_SHARED],
+  ],
+  [["obs-1", "op-hash-other-1"]],
 ];
 const LONG_AGO = "2000-01-01T00:00:00.000Z";
 
@@ -65,22 +80,26 @@ async function seedRow(
     .run();
 }
 
-// The fresh warrant, the expired chain lock and the backlog bucket trip the alert rules,
-// so `evaluate` writes an entity key in each DNA-bearing shape.
-async function seedDna(dna: string, opHash: string) {
+// The fresh warrants, the expired chain lock and the backlog bucket trip the alert rules,
+// so `evaluate` writes an entity key in each shape the wipe matches.
+async function seedDna(dna: string, warrants: Warrant[]) {
   for (const table of await dnaTables()) {
+    if (table === "warrants") continue;
     const values: Record<string, string | number> = { dna_b64: dna };
-    if (table === "warrants") {
-      values.op_hash_b64 = opHash;
-      values.first_seen_at = new Date().toISOString();
-    }
     if (table === "chain_locks") values.expires_at_iso = LONG_AGO;
     if (table === "derived_metrics_ts") values.pending_backlog = 1;
     if (table === "bridge_services" || table === "bridge_backlog") values.observer_id = dna;
     await seedRow(table, values, { shared: true });
   }
-  await seedRow("warrant_sightings", { op_hash_b64: opHash, observer_id: "obs-1" });
-  await seedRow("warrant_sightings", { op_hash_b64: opHash, observer_id: "obs-2" });
+  for (const [observer_id, op_hash_b64] of warrants) {
+    const first_seen_at = new Date().toISOString();
+    await seedRow(
+      "warrants",
+      { dna_b64: dna, observer_id, op_hash_b64, first_seen_at },
+      { shared: true },
+    );
+    await seedRow("warrant_sightings", { op_hash_b64, observer_id }, { shared: true });
+  }
   await evaluate(env);
 }
 
@@ -106,6 +125,13 @@ async function incidentKeysMentioning(dna: string, opHash: string): Promise<stri
   return results.map((r) => r.entity_key).sort();
 }
 
+async function dnasWarranting(opHash: string): Promise<string[]> {
+  const { results } = await env.DB.prepare("SELECT dna_b64 FROM warrants WHERE op_hash_b64 = ?")
+    .bind(opHash)
+    .all<{ dna_b64: string }>();
+  return results.map((r) => r.dna_b64).sort();
+}
+
 describe("scripts/wipe-dna.sql", () => {
   beforeAll(async () => {
     await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
@@ -129,19 +155,21 @@ describe("scripts/wipe-dna.sql", () => {
       if (table === "alert_rules" || table === "alert_incidents") continue;
       await seedRow(table, table === "observers" ? { last_seen_iso: LONG_AGO } : {});
     }
-    for (const [i, dna] of OTHER_DNAS.entries()) await seedDna(dna, `op-hash-other-${i}`);
+    for (const [i, dna] of OTHER_DNAS.entries()) await seedDna(dna, OTHER_WARRANTS[i]);
     await seedRow("blocks", {
       target_id: `Cell(CellId(DnaHash(u${DNA_A}), AgentPubKey(uhCAk${"a".repeat(48)})))`,
     });
     await seedRow("analysis_runs", { result_json: JSON.stringify([{ op_hash_b64: OP_A }]) });
     const expected = await snapshot();
+    expect(await incidentKeysMentioning(OTHER_DNAS[0], OP_SHARED)).toContain(OP_SHARED);
 
-    await seedDna(DNA_A, OP_A);
+    await seedDna(DNA_A, WARRANTS_A);
     const withA = await snapshot();
     for (const table of await wipedTables()) {
       expect(withA[table].length, table).toBeGreaterThan(expected[table].length);
     }
     expect(await incidentKeysMentioning(DNA_A, OP_A)).toHaveLength(3);
+    expect(await dnasWarranting(OP_SHARED)).toEqual([DNA_A, OTHER_DNAS[0]].sort());
 
     await wipe(DNA_A);
 
