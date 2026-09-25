@@ -187,6 +187,7 @@ for (const shownBy of ["focus", "hover"] as const) {
     await expect(page.getByRole("tooltip")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("tooltip")).toBeHidden();
+    if (shownBy === "focus") await expect(tip).toBeFocused();
   });
 }
 
