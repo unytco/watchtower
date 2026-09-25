@@ -151,24 +151,21 @@ test("DNA with no migrations renders the counters at zero", async ({ page }) => 
 
 test("Activity help tips open inside the viewport", async ({ page }) => {
   const width = 700;
+  const changed = { validation_coverage: 4, dnas_seen: 3, agents_discovered: 2, chain_locks: 1 };
   await page.setViewportSize({ width, height: 900 });
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === "/api/diff") {
-      return route.fulfill({
-        json: {
-          changed: { validation_coverage: 4, dnas_seen: 3, agents_discovered: 2, chain_locks: 1 },
-        },
-      });
-    }
+    if (path === "/api/diff") return route.fulfill({ json: { changed } });
     return route.fulfill({ json: {} });
   });
 
   await page.goto(`/dnas/${encodeURIComponent(DNA_B64)}/diff`);
-  await expect(page.getByText("DNA activity")).toBeVisible();
+  await expect(page.getByRole("button", { name: "What does Activity mean?" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /change mean\?$/ })).toHaveCount(
+    Object.keys(changed).length,
+  );
 
   const tips = page.getByRole("button", { name: /^What does/ });
-  await expect(tips).toHaveCount(5);
   for (const tip of await tips.all()) {
     const name = await tip.getAttribute("aria-label");
     await tip.focus();
