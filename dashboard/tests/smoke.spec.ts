@@ -188,3 +188,36 @@ test("a help tip shown by keyboard focus closes on Escape", async ({ page }) => 
   await expect(page.getByRole("tooltip")).toBeHidden();
   await expect(tip).toBeFocused();
 });
+
+test("Activity claims an empty window only once the counts arrive", async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/diff") {
+      await held;
+      return route.fulfill({ json: { changed: {} } });
+    }
+    return route.fulfill({ json: {} });
+  });
+
+  const diffRequested = page.waitForRequest((r) => r.url().includes("/api/diff"));
+  await page.goto(`/dnas/${encodeURIComponent(DNA_B64)}/diff`);
+  await diffRequested;
+  const empty = page.getByText("No observer reported this DNA in this window.");
+  await expect(empty).toBeHidden();
+  release();
+  await expect(empty).toBeVisible();
+});
+
+test("Activity shows a load failure instead of an empty window", async ({ page }) => {
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/diff") return route.fulfill({ status: 500, body: "D1 limit reached" });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto(`/dnas/${encodeURIComponent(DNA_B64)}/diff`);
+  await expect(page.getByText(/Failed to load activity: .*500 D1 limit reached/)).toBeVisible();
+  await expect(page.getByText("No observer reported this DNA in this window.")).toBeHidden();
+});

@@ -167,7 +167,7 @@ export function DnaDiff() {
   const [minutes, setMinutes] = useState(60);
   const [showEmpty, setShowEmpty] = useState(false);
   const since = useMemo(() => new Date(Date.now() - minutes * 60 * 1000).toISOString(), [minutes]);
-  const { data } = useDiff(since, { dna });
+  const { data, error } = useDiff(since, { dna });
   const changed = data?.changed ?? {};
 
   const dnaRows = DNA_SCOPED.map((t) => ({
@@ -226,20 +226,30 @@ export function DnaDiff() {
         </div>
       </section>
 
-      <Section
-        title="DNA activity"
-        subtitle="Filtered to this DNA. Counts rows that were new or changed in the window."
-        rows={dnaRows}
-        empty="No observer reported this DNA in this window."
-      />
+      {error ? (
+        <div className="border border-border rounded p-4 text-sm text-danger">
+          Failed to load activity: {String(error)}
+        </div>
+      ) : (
+        data && (
+          <>
+            <Section
+              title="DNA activity"
+              subtitle="Filtered to this DNA. Counts rows that were new or changed in the window."
+              rows={dnaRows}
+              empty="No observer reported this DNA in this window."
+            />
 
-      <Section
-        title="Node activity"
-        subtitle="These tables don't carry a DNA column in the schema, so the counts cover every observer's node, not just this DNA."
-        rows={nodeRows}
-        dim
-        empty="No node-level changes in this window."
-      />
+            <Section
+              title="Node activity"
+              subtitle="These tables don't carry a DNA column in the schema, so the counts cover every observer's node, not just this DNA."
+              rows={nodeRows}
+              dim
+              empty="No node-level changes in this window."
+            />
+          </>
+        )
+      )}
     </div>
   );
 }
