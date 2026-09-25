@@ -124,8 +124,8 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
       <div className="space-y-1.5">
         <div>A per-agent chain summary appeared, or its action count changed.</div>
         <div className="text-muted">
-          Usually means that agent authored more actions, or the observer caught up on ones it
-          already had.
+          Usually means that agent authored more actions, or the observer received older ones
+          through gossip.
         </div>
       </div>
     ),
