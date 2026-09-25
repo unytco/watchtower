@@ -13,8 +13,8 @@ const PRESETS = [
   { label: "24 hours", minutes: 1440 },
 ];
 
-// Source of truth: watchtower/worker/src/routes.ts /diff handler and its
-// countSince helper.
+// Must match the /diff table list and countSince's tablesWithoutDna in
+// worker/src/routes.ts; a table missing here is never shown.
 const DNA_SCOPED = [
   "dnas_seen",
   "agents_discovered",
@@ -37,9 +37,8 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
       <div className="space-y-1.5">
         <div>An observer posted a snapshot that includes this DNA.</div>
         <div className="text-muted">
-          Unlike the other tables, this moves on every post to refresh the observer's{" "}
-          <span className="mono">last_seen</span> timestamp, so it counts the observers reporting
-          this DNA.
+          Unlike the other tables, this moves on every post to refresh the observer's last-seen
+          time, so it counts the observers reporting this DNA.
         </div>
       </div>
     ),
@@ -50,9 +49,9 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
       <div className="space-y-1.5">
         <div>A new agent was seen, or an existing one's counts or flags changed.</div>
         <div className="text-muted">
-          Covers freshly-discovered pubkeys and changes to{" "}
-          <span className="mono">action_count</span>, warrant counts or the closed and opened flags.
-          A newer last-seen time alone does not count.
+          Covers freshly-discovered pubkeys, changes to the tag,{" "}
+          <span className="mono">action_count</span> or warrant counts, and the closed or opened
+          flag being set. A newer last-seen time alone does not count.
         </div>
       </div>
     ),
@@ -66,8 +65,7 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
           on.
         </div>
         <div className="text-muted">
-          Warrants are append-only on the DHT; a count here means propagation or validation
-          progress, not a re-sighting.
+          Warrants are append-only on the DHT, so seeing a known warrant again does not count.
         </div>
       </div>
     ),
@@ -78,8 +76,8 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
       <div className="space-y-1.5">
         <div>A chain lock was granted or renewed.</div>
         <div className="text-muted">
-          Locks have an <span className="mono">expires_at</span>. A new lock or a new expiry counts;
-          seeing the same lock again does not.
+          Locks have an <span className="mono">expires_at</span>. Seeing the same lock with the same
+          expiry again does not count.
         </div>
       </div>
     ),
@@ -105,8 +103,7 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
       <div className="space-y-1.5">
         <div>A cell scheduled a new zome call, or an existing one's next run moved.</div>
         <div className="text-muted">
-          Holochain's scheduler persists its queue; new rows appear when zome code schedules future
-          work.
+          A recurring schedule's next run moves each time it fires, so it counts again on every run.
         </div>
       </div>
     ),
@@ -117,8 +114,7 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
       <div className="space-y-1.5">
         <div>An observer published a new DHT arc slice hash.</div>
         <div className="text-muted">
-          These summarise what each observer believes its arc looks like and power cross-observer
-          divergence checks.
+          These summarise what each observer believes its arc looks like.
         </div>
       </div>
     ),
@@ -140,8 +136,8 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
       <div className="space-y-1.5">
         <div>A capability grant was issued or updated on this node.</div>
         <div className="text-muted">
-          Node-scoped: the schema doesn't carry a DNA column here, so the count is for the whole
-          observer host.
+          Node-scoped: the schema doesn't carry a DNA column here, so the count covers every
+          observer's node.
         </div>
       </div>
     ),
@@ -159,7 +155,7 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Apps",
     help: (
       <div className="space-y-1.5">
-        <div>An installed hApp was installed, updated or cloned.</div>
+        <div>An observer saw an installed hApp for the first time.</div>
         <div className="text-muted">Node-scoped, not filtered by DNA.</div>
       </div>
     ),
@@ -203,8 +199,7 @@ export function DnaDiff() {
                 <div className="text-muted">
                   Not a state diff. Each observer keeps its own rows, written only when what it
                   reports is new or different, so one change seen by three observers counts three.
-                  DNAs seen is the exception: it moves on every post. A count of <em>N</em> means "
-                  <em>N</em> rows are new or changed," not "<em>N</em> things changed meaning."
+                  DNAs seen is the exception: it moves on every post.
                 </div>
               </div>
             </HelpTip>
@@ -233,14 +228,14 @@ export function DnaDiff() {
 
       <Section
         title="DNA activity"
-        subtitle="Filtered to this DNA. A count is the rows that were new or changed in the window."
+        subtitle="Filtered to this DNA. Counts rows that were new or changed in the window."
         rows={dnaRows}
-        empty="Nothing changed for this DNA in this window."
+        empty="No observer reported this DNA in this window."
       />
 
       <Section
         title="Node activity"
-        subtitle="These tables don't carry a DNA column in the schema, so the counts cover the whole observer host — not just this DNA."
+        subtitle="These tables don't carry a DNA column in the schema, so the counts cover every observer's node, not just this DNA."
         rows={nodeRows}
         dim
         empty="No node-level changes in this window."
