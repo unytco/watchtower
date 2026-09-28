@@ -13,10 +13,8 @@ const PRESETS = [
   { label: "24 hours", minutes: 1440 },
 ];
 
-// Source of truth: watchtower/worker/src/routes.ts /diff handler and its
-// countSince helper. Tables are split by whether the D1 schema carries a
-// dna_b64 column — node-scoped tables cannot be filtered by DNA, so their
-// counts reflect the whole observer host.
+// Must match the /diff table list and countSince's tablesWithoutDna in
+// worker/src/routes.ts; a table missing here is never shown.
 const DNA_SCOPED = [
   "dnas_seen",
   "agents_discovered",
@@ -37,10 +35,10 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "DNAs seen",
     help: (
       <div className="space-y-1.5">
-        <div>An observer upserted its record for this DNA.</div>
+        <div>An observer posted a snapshot that includes this DNA.</div>
         <div className="text-muted">
-          Usually just means the observer reconnected to the cell and refreshed the{" "}
-          <span className="mono">last_seen</span> timestamp.
+          Unlike the other tables, this moves on every post to refresh the observer's last-seen
+          time, so it counts the observers reporting this DNA.
         </div>
       </div>
     ),
@@ -49,10 +47,11 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Agents",
     help: (
       <div className="space-y-1.5">
-        <div>A new agent was seen, or an existing one's activity grew.</div>
+        <div>A new agent was seen, or an existing one's counts or flags changed.</div>
         <div className="text-muted">
-          Covers both freshly-discovered pubkeys and bumps to{" "}
-          <span className="mono">action_count</span> on existing agents.
+          Covers freshly-discovered pubkeys, changes to the tag,{" "}
+          <span className="mono">action_count</span> or warrant counts, and the closed or opened
+          flag being set. A newer last-seen time alone does not count.
         </div>
       </div>
     ),
@@ -61,10 +60,10 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Warrants",
     help: (
       <div className="space-y-1.5">
-        <div>The observer sighted a warrant op it hadn't seen before.</div>
+        <div>An observer saw a warrant op it hadn't seen before.</div>
         <div className="text-muted">
-          Warrants are append-only on the DHT; a count here means propagation, not that an existing
-          warrant changed.
+          Observers report only integrated warrants, whose recorded fields never change, so seeing a
+          known warrant again does not count.
         </div>
       </div>
     ),
@@ -73,10 +72,10 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Chain locks",
     help: (
       <div className="space-y-1.5">
-        <div>A chain lock was granted, renewed or re-observed.</div>
+        <div>A chain lock was granted or renewed.</div>
         <div className="text-muted">
-          Locks have an <span className="mono">expires_at</span> and churn naturally as cells
-          acquire and release them.
+          Locks have an <span className="mono">expires_at</span>. Seeing the same lock with the same
+          expiry again does not count.
         </div>
       </div>
     ),
@@ -86,11 +85,12 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     help: (
       <div className="space-y-1.5">
         <div>
-          A <span className="mono">receipt_count</span> ticked up for an op.
+          An op joined the least-validated list, or its <span className="mono">receipt_count</span>{" "}
+          ticked up.
         </div>
         <div className="text-muted">
-          Means another peer signed off on that op's validation — the DHT reached stronger consensus
-          on its validity.
+          Observers track the ops with the fewest validation receipts. A tick up means another peer
+          signed off on that op's validation.
         </div>
       </div>
     ),
@@ -99,10 +99,10 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Scheduled functions",
     help: (
       <div className="space-y-1.5">
-        <div>A cell registered a new scheduled zome call.</div>
+        <div>A cell scheduled a new zome call, or an existing one's next run moved.</div>
         <div className="text-muted">
-          Holochain's scheduler persists its queue; new rows appear when zome code schedules future
-          work.
+          A recurring schedule's next run moves each time it fires, so it counts once in any window
+          where it fired.
         </div>
       </div>
     ),
@@ -111,10 +111,9 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Slice hashes",
     help: (
       <div className="space-y-1.5">
-        <div>An observer published a new DHT arc slice hash.</div>
+        <div>An observer reported a new or changed DHT arc slice hash.</div>
         <div className="text-muted">
-          These summarise what each observer believes its arc looks like and power cross-observer
-          divergence checks.
+          These summarise what each observer believes its arc looks like.
         </div>
       </div>
     ),
@@ -123,9 +122,10 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Chain summaries",
     help: (
       <div className="space-y-1.5">
-        <div>A per-agent chain summary (action count, last seen) changed.</div>
+        <div>A per-agent chain summary appeared, or its action count changed.</div>
         <div className="text-muted">
-          Usually means that agent authored more actions since the last snapshot.
+          Usually means that agent authored more actions, or the observer received older ones
+          through gossip.
         </div>
       </div>
     ),
@@ -134,10 +134,10 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Capability grants",
     help: (
       <div className="space-y-1.5">
-        <div>A capability grant was issued, updated or revoked on this node.</div>
+        <div>An observer's node issued or updated a capability grant.</div>
         <div className="text-muted">
-          Node-scoped: the schema doesn't carry a DNA column here, so the count is for the whole
-          observer host.
+          Node-scoped: the schema doesn't carry a DNA column here, so the count covers every
+          observer's node.
         </div>
       </div>
     ),
@@ -155,7 +155,7 @@ const TABLE_INFO: Record<TableName, { label: string; help: ReactNode }> = {
     label: "Apps",
     help: (
       <div className="space-y-1.5">
-        <div>An installed hApp was installed, updated or cloned.</div>
+        <div>An observer saw an installed hApp for the first time.</div>
         <div className="text-muted">Node-scoped, not filtered by DNA.</div>
       </div>
     ),
@@ -167,7 +167,7 @@ export function DnaDiff() {
   const [minutes, setMinutes] = useState(60);
   const [showEmpty, setShowEmpty] = useState(false);
   const since = useMemo(() => new Date(Date.now() - minutes * 60 * 1000).toISOString(), [minutes]);
-  const { data } = useDiff(since, { dna });
+  const { data, error } = useDiff(since, { dna });
   const changed = data?.changed ?? {};
 
   const dnaRows = DNA_SCOPED.map((t) => ({
@@ -192,12 +192,14 @@ export function DnaDiff() {
             Window
             <HelpTip label="What does Activity mean?">
               <div className="space-y-1.5">
-                <div>Rows in watchtower's database that observers upserted during this window.</div>
+                <div>
+                  Rows in watchtower's database that were new, or whose content changed, during this
+                  window.
+                </div>
                 <div className="text-muted">
-                  Not a state diff — Holochain content is deterministic, but the set of agents,
-                  warrants, locks and grants grows over time, and observers refresh their snapshots
-                  on a schedule. A count of <em>N</em> means "<em>N</em> rows were touched," not "
-                  <em>N</em> things changed meaning."
+                  Not a state diff. Each observer keeps its own rows, written only when what it
+                  reports is new or different, so one change seen by three observers counts three.
+                  DNAs seen is the exception: it moves on every post.
                 </div>
               </div>
             </HelpTip>
@@ -224,20 +226,30 @@ export function DnaDiff() {
         </div>
       </section>
 
-      <Section
-        title="DNA activity"
-        subtitle="Filtered to this DNA. A count reflects upserts the observers reported in the window."
-        rows={dnaRows}
-        empty="Nothing changed for this DNA in this window."
-      />
+      {error ? (
+        <div className="border border-border rounded p-4 text-sm text-danger">
+          Failed to load activity: {String(error)}
+        </div>
+      ) : (
+        data && (
+          <>
+            <Section
+              title="DNA activity"
+              subtitle="Filtered to this DNA. Counts rows that were new or changed in the window."
+              rows={dnaRows}
+              empty="No observer reported this DNA in this window."
+            />
 
-      <Section
-        title="Node activity"
-        subtitle="These tables don't carry a DNA column in the schema, so the counts cover the whole observer host — not just this DNA."
-        rows={nodeRows}
-        dim
-        empty="No node-level changes in this window."
-      />
+            <Section
+              title="Node activity"
+              subtitle="These tables don't carry a DNA column in the schema, so the counts cover every observer's node, not just this DNA."
+              rows={nodeRows}
+              dim
+              empty="No node-level changes in this window."
+            />
+          </>
+        )
+      )}
     </div>
   );
 }

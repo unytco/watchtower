@@ -1,6 +1,8 @@
-import { env, SELF } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import schemaSql from "../src/schema.sql?raw";
+import type { DerivedMetrics } from "../src/types";
+import { applySql, dnaSnapshot, observerPayload, registerObserver, signedRequest } from "./helpers";
 
 // B107: a degraded observer read posts `null` for a derived metric, not a
 // misleading 0. This proves the null survives ingest (the column is nullable as
@@ -13,123 +15,18 @@ const DNA_DEGRADED = "dna-degraded";
 const DNA_IDLE = "dna-idle";
 
 async function applySchema() {
-  const stripped = schemaSql
-    .split("\n")
-    .filter((line: string) => !line.trim().startsWith("--"))
-    .join("\n");
-  const singleLine = stripped
-    .split(/;\s*\n/)
-    .map((s: string) => s.replace(/\s+/g, " ").trim())
-    .filter((s: string) => s.length > 0)
-    .map((s: string) => `${s};`)
-    .join("\n");
-  await env.DB.exec(singleLine);
-  await env.DB.prepare(
-    "INSERT OR REPLACE INTO observer_secrets (observer_id, secret_hex, created_at) VALUES (?, ?, ?)",
-  )
-    .bind(OBSERVER_ID, SECRET_HEX, new Date().toISOString())
-    .run();
+  await applySql(schemaSql);
+  await registerObserver(OBSERVER_ID, SECRET_HEX);
 }
 
-async function sha256Hex(buf: ArrayBuffer): Promise<string> {
-  const d = await crypto.subtle.digest("SHA-256", buf);
-  return toHex(new Uint8Array(d));
-}
-async function hmacHex(secretHex: string, msg: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    fromHex(secretHex),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg));
-  return toHex(new Uint8Array(sig));
-}
-function toHex(b: Uint8Array): string {
-  let s = "";
-  for (const x of b) s += x.toString(16).padStart(2, "0");
-  return s;
-}
-function fromHex(s: string): Uint8Array {
-  const out = new Uint8Array(s.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16);
-  return out;
-}
-
-type DerivedMetrics = {
-  integration_rate: number | null;
-  lag_p50_ms: number | null;
-  lag_p99_ms: number | null;
-  pending_backlog: number | null;
-};
-
-function payload(dna_b64: string, derived_metrics: DerivedMetrics): object {
-  return {
-    schema_version: 1,
-    observer_id: OBSERVER_ID,
-    collected_at: new Date().toISOString(),
-    self_health: {
-      uptime_s: 60,
-      last_collection_ms: 100,
-      n_errors_this_cycle: 0,
-      binary_version: "test",
-    },
-    node: {
-      conductor: {
-        holochain_version: "0.7.0",
-        admin_port: 8888,
-        running_apps: 1,
-        paused_apps: 0,
-        disabled_apps: 0,
-        nonce_count: 1,
-        nonce_duplicate_count: 0,
-      },
-      dnas: [
-        {
-          dna_b64,
-          dna_tag: null,
-          dna_definition: null,
-          agents: [],
-          warrants: [],
-          chain_summaries: [],
-          slice_hashes: [],
-          chain_locks: [],
-          scheduled_functions: [],
-          validation_coverage: [],
-          cap_grants: [],
-          derived_metrics,
-          pending_ops_count: 0,
-          integrated_ops_count: 0,
-        },
-      ],
-      apps: [],
-      blocks: [],
-    },
-  };
+function payload(dna_b64: string, derived_metrics: DerivedMetrics) {
+  return observerPayload(OBSERVER_ID, new Date().toISOString(), {
+    dnas: [dnaSnapshot(dna_b64, { derived_metrics })],
+  });
 }
 
 async function ingest(bodyObj: unknown) {
-  const body = new TextEncoder().encode(JSON.stringify(bodyObj));
-  const ts = new Date().toISOString();
-  const nonce = crypto.randomUUID();
-  const digest = await sha256Hex(body.buffer as ArrayBuffer);
-  const sig = await hmacHex(SECRET_HEX, [OBSERVER_ID, ts, nonce, digest].join("\n"));
-  const resp = await SELF.fetch(
-    new Request("http://test/ingest", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-watchtower-schema": "1",
-        "x-watchtower-observer": OBSERVER_ID,
-        "x-watchtower-ts": ts,
-        "x-watchtower-nonce": nonce,
-        "x-watchtower-sig": sig,
-      },
-      body,
-    }),
-  );
-  return resp;
+  return SELF.fetch(await signedRequest("/ingest", OBSERVER_ID, SECRET_HEX, bodyObj));
 }
 
 async function metricsFor(dna: string): Promise<Record<string, unknown>[]> {

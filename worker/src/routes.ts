@@ -202,13 +202,16 @@ routes.get("/dnas/:dna/bridge", async (c) => {
       WHERE dna_b64 = ?
       ORDER BY last_seen_iso DESC`,
   ).bind(dna);
+  // A backlog row is rewritten only when its numbers change, so the latest
+  // collection that confirmed them is its reporter's last-seen time.
   const backlogQ = c.env.DB.prepare(
-    `SELECT observer_id, dna_b64, collected_at,
-            detected, queued, claimed, in_flight,
-            succeeded_total, failed_total, oldest_queued_age_s, updated_at
-       FROM bridge_backlog
-      WHERE dna_b64 = ?
-      ORDER BY collected_at DESC`,
+    `SELECT b.observer_id, b.dna_b64, s.last_seen_iso AS collected_at,
+            b.detected, b.queued, b.claimed, b.in_flight,
+            b.succeeded_total, b.failed_total, b.oldest_queued_age_s, b.updated_at
+       FROM bridge_backlog b
+       JOIN bridge_services s ON s.observer_id = b.observer_id
+      WHERE b.dna_b64 = ?
+      ORDER BY s.last_seen_iso DESC`,
   ).bind(dna);
   const throughputQ = c.env.DB.prepare(
     `SELECT observer_id, dna_b64, bucket_hour_iso,

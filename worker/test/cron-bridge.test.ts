@@ -3,27 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import schemaSql from "../src/schema.sql?raw";
 import bridgeMigration from "../migrations/0002_bridge.sql?raw";
 import { scheduled } from "../src/cron";
-
-// Apply both the base schema and the bridge migration into the
-// Miniflare D1 instance. The base schema matches the reusable helper
-// in `ingest.test.ts`; we just tack on the bridge tables so `cron`
-// has somewhere to trim.
-async function applySchema() {
-  const toExec = (sql: string) => {
-    const stripped = sql
-      .split("\n")
-      .filter((line: string) => !line.trim().startsWith("--"))
-      .join("\n");
-    return stripped
-      .split(/;\s*\n/)
-      .map((s: string) => s.replace(/\s+/g, " ").trim())
-      .filter((s: string) => s.length > 0)
-      .map((s: string) => `${s};`)
-      .join("\n");
-  };
-  await env.DB.exec(toExec(schemaSql));
-  await env.DB.exec(toExec(bridgeMigration));
-}
+import { applySql } from "./helpers";
 
 const OBS_FRESH = "bridge-fresh";
 const OBS_STALE = "bridge-stale";
@@ -75,12 +55,10 @@ async function seed() {
 
 describe("scheduled cron bridge trims", () => {
   beforeEach(async () => {
-    // Clean slate between cases so the alert/cross-observer side
-    // effects from `scheduled` don't leak state.
     await env.DB.exec("DROP TABLE IF EXISTS bridge_services;");
     await env.DB.exec("DROP TABLE IF EXISTS bridge_backlog;");
     await env.DB.exec("DROP TABLE IF EXISTS bridge_throughput_ts;");
-    await applySchema();
+    await applySql(schemaSql, bridgeMigration);
     await seed();
   });
 
@@ -92,7 +70,20 @@ describe("scheduled cron bridge trims", () => {
     expect(results.map((r) => r.observer_id)).toEqual([OBS_FRESH]);
   });
 
-  it("drops stale bridge_backlog rows older than 14 days", async () => {
+  it("drops the backlog of a reporter whose service row expired", async () => {
+    await scheduled(env);
+    const { results } = await env.DB.prepare(
+      "SELECT observer_id FROM bridge_backlog ORDER BY observer_id",
+    ).all<{ observer_id: string }>();
+    expect(results.map((r) => r.observer_id)).toEqual([OBS_FRESH]);
+  });
+
+  it("keeps a live reporter's backlog whose numbers have not changed for 14 days", async () => {
+    await env.DB.prepare(
+      "UPDATE bridge_backlog SET collected_at = ?, updated_at = ? WHERE observer_id = ?",
+    )
+      .bind(isoDaysAgo(20), isoDaysAgo(20), OBS_FRESH)
+      .run();
     await scheduled(env);
     const { results } = await env.DB.prepare(
       "SELECT observer_id FROM bridge_backlog ORDER BY observer_id",

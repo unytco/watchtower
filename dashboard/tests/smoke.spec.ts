@@ -148,3 +148,78 @@ test("DNA with no migrations renders the counters at zero", async ({ page }) => 
   await expect(page.getByTestId("tile-agents-closed")).toHaveText("0");
   await expect(page.getByTestId("tile-agents-opened")).toHaveText("0");
 });
+
+test("Activity help tips open inside the viewport", async ({ page }) => {
+  const width = 700;
+  const changed = { validation_coverage: 4, dnas_seen: 3, agents_discovered: 2, chain_locks: 1 };
+  await page.setViewportSize({ width, height: 900 });
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/diff") return route.fulfill({ json: { changed } });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto(`/dnas/${encodeURIComponent(DNA_B64)}/diff`);
+  await expect(page.getByRole("button", { name: "What does Activity mean?" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /change mean\?$/ })).toHaveCount(
+    Object.keys(changed).length,
+  );
+
+  const tips = page.getByRole("button", { name: /^What does/ });
+  for (const tip of await tips.all()) {
+    const name = await tip.getAttribute("aria-label");
+    await tip.focus();
+    const box = await page.getByRole("tooltip").boundingBox();
+    expect(box, name!).not.toBeNull();
+    expect(box!.x, name!).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width, name!).toBeLessThanOrEqual(width);
+    await tip.blur();
+  }
+});
+
+for (const shownBy of ["focus", "hover"] as const) {
+  test(`a help tip shown by ${shownBy} closes on Escape`, async ({ page }) => {
+    await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
+    await page.goto(`/dnas/${encodeURIComponent(DNA_B64)}/diff`);
+
+    const tip = page.getByRole("button", { name: "What does Activity mean?" });
+    await tip[shownBy]();
+    await expect(page.getByRole("tooltip")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tooltip")).toBeHidden();
+    if (shownBy === "focus") await expect(tip).toBeFocused();
+  });
+}
+
+test("Activity claims an empty window only once the counts arrive", async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/diff") {
+      await held;
+      return route.fulfill({ json: { changed: {} } });
+    }
+    return route.fulfill({ json: {} });
+  });
+
+  const diffRequested = page.waitForRequest((r) => r.url().includes("/api/diff"));
+  await page.goto(`/dnas/${encodeURIComponent(DNA_B64)}/diff`);
+  await diffRequested;
+  const empty = page.getByText("No observer reported this DNA in this window.");
+  await expect(empty).toBeHidden();
+  release();
+  await expect(empty).toBeVisible();
+});
+
+test("Activity shows a load failure instead of an empty window", async ({ page }) => {
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/diff") return route.fulfill({ status: 500, body: "D1 limit reached" });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto(`/dnas/${encodeURIComponent(DNA_B64)}/diff`);
+  await expect(page.getByText(/Failed to load activity: .*500 D1 limit reached/)).toBeVisible();
+  await expect(page.getByText("No observer reported this DNA in this window.")).toBeHidden();
+});
