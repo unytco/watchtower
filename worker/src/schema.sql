@@ -149,6 +149,8 @@ CREATE TABLE IF NOT EXISTS dna_definitions (
   PRIMARY KEY (observer_id, dna_b64)
 );
 
+-- Only a Worker that predates cap_grants_by_action writes here. The table stays
+-- so that rolling back to one keeps ingest working.
 CREATE TABLE IF NOT EXISTS cap_grants (
   observer_id           TEXT NOT NULL,
   app_id                TEXT NOT NULL,
@@ -159,6 +161,20 @@ CREATE TABLE IF NOT EXISTS cap_grants (
   updated_at            TEXT NOT NULL,
   PRIMARY KEY (observer_id, app_id, cell_b64, tag)
 );
+
+-- An observer that predates action_hash_b64 omits it, so all its grants share
+-- the hash '' and tag in the key keeps them apart.
+CREATE TABLE IF NOT EXISTS cap_grants_by_action (
+  observer_id           TEXT NOT NULL,
+  action_hash_b64       TEXT NOT NULL,
+  tag                   TEXT NOT NULL,
+  app_id                TEXT NOT NULL,
+  cell_b64              TEXT NOT NULL,
+  function_count        INTEGER NOT NULL,
+  access_type           TEXT NOT NULL,
+  updated_at            TEXT NOT NULL,
+  PRIMARY KEY (observer_id, action_hash_b64, tag)
+) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS blocks (
   observer_id           TEXT NOT NULL,

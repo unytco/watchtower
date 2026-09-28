@@ -10,7 +10,7 @@ use holochain_data::models::dht::{CapGrantRow, ChainLockRow as DbChainLockRow};
 use holochain_integrity_types::prelude::{
     ActionType, CapAccessType, GrantedFunctions, RecordValidity,
 };
-use holochain_zome_types::prelude::{AgentPubKey, Entry};
+use holochain_zome_types::prelude::{ActionHash, AgentPubKey, Entry};
 use sqlx::{AssertSqlSafe, Row};
 
 /// Receipt-count row for a validated DHT op. Use this to surface ops the
@@ -307,15 +307,18 @@ pub async fn migration_status_by_author(dht: &HolochainDb) -> HcOpsResult<Vec<Mi
         .map_err(HcOpsError::from)
 }
 
-/// Cap-grant tag + function count.
+/// One `CapGrant` index row.
 #[derive(Debug, Clone)]
 pub struct CapGrantRowSummary {
+    pub action_hash: ActionHash,
     pub tag: Option<String>,
     pub function_count: i64,
     pub access_type: String,
 }
 
-/// Capability grants this node has authored.
+/// Every capability grant action this node has authored. The conductor indexes
+/// a grant's `Create` and each `Update`, and a `Delete` removes neither, so a
+/// grant is listed once per action whatever its current state.
 ///
 /// The `CapGrant` index carries the access type and tag; the granted function
 /// list is only in the entry itself, and cap-grant entries are private, so the
@@ -341,6 +344,7 @@ pub async fn list_capability_grants(dht: &HolochainDb) -> HcOpsResult<Vec<CapGra
     Ok(rows
         .into_iter()
         .map(|r| CapGrantRowSummary {
+            action_hash: ActionHash::from_raw_36(r.grant.action_hash),
             tag: r.grant.tag,
             function_count: count_grant_functions(r.entry_blob.as_deref()),
             access_type: access_type_label(r.grant.cap_access),

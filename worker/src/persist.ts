@@ -188,9 +188,14 @@ function dnaStatements(
 
   for (const g of d.cap_grants) {
     statements.push(
-      upsertIfChanged(db, "cap_grants", {
-        key: { observer_id, app_id: g.app_id, cell_b64: g.cell_b64, tag: g.tag ?? "" },
-        content: { function_count: g.function_count, access_type: g.access_type },
+      upsertIfChanged(db, "cap_grants_by_action", {
+        key: { observer_id, action_hash_b64: g.action_hash_b64 ?? "", tag: g.tag ?? "" },
+        content: {
+          app_id: g.app_id,
+          cell_b64: g.cell_b64,
+          function_count: g.function_count,
+          access_type: g.access_type,
+        },
         stamp: { updated_at },
       }),
     );

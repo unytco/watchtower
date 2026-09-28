@@ -412,7 +412,8 @@ async function countSince(
     "chain_summaries",
   ]);
   if (!allowed.has(table)) return 0;
-  let sql = `SELECT COUNT(*) AS c FROM ${table} WHERE updated_at >= ?`;
+  const source = table === "cap_grants" ? "cap_grants_by_action" : table;
+  let sql = `SELECT COUNT(*) AS c FROM ${source} WHERE updated_at >= ?`;
   const binds: unknown[] = [since];
   if (observerId) {
     sql += ` AND observer_id = ?`;

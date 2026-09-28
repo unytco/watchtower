@@ -720,27 +720,22 @@ async fn validation_coverage_returns_the_least_witnessed_ops_first() {
     assert_eq!(rows[2].op_hash, op_hash(0x81).get_raw_36().to_vec());
 }
 
-#[tokio::test]
-async fn capability_grants_report_access_type_and_function_count() {
-    let tmp = tempfile::tempdir().unwrap();
-    let db = new_dht_db(tmp.path(), None).await;
-    let author = agent(0x11);
-
-    let mut functions = BTreeSet::new();
-    functions.insert(("alliance".into(), "recv_remote_signal".into()));
-    functions.insert(("alliance".into(), "notary_read".into()));
-    let grant = ZomeCallCapGrant {
-        tag: "notary".to_string(),
-        access: CapAccess::Unrestricted,
-        functions: GrantedFunctions::Listed(functions.into_iter().collect()),
-    };
-    let entry = Entry::CapGrant(grant);
-    let entry_hash = EntryHash::from_raw_36(vec![0xa1; 36]);
-
+/// `entry_byte` stands in for the entry hash: grants whose content differs need
+/// different bytes, since `PrivateEntry` keeps only the first entry per hash and
+/// author.
+async fn commit_unrestricted_grant(
+    db: &DbWrite<kind::Dht>,
+    action_byte: u8,
+    author: &AgentPubKey,
+    entry_byte: u8,
+    tag: &str,
+    functions: GrantedFunctions,
+) -> ActionHash {
+    let entry_hash = EntryHash::from_raw_36(vec![entry_byte; 36]);
     let action = signed_action(
-        0x01,
-        &author,
-        1,
+        action_byte,
+        author,
+        u32::from(action_byte),
         1_000,
         ActionData::Create(CreateData {
             entry_type: EntryType::CapGrant,
@@ -750,17 +745,41 @@ async fn capability_grants_report_access_type_and_function_count() {
     db.insert_action(&action, Some(RecordValidity::Accepted))
         .await
         .unwrap();
-    // Cap-grant entries are private, so the content lives in `PrivateEntry`.
-    db.insert_private_entry(&entry_hash, &author, &entry)
+    let grant = ZomeCallCapGrant {
+        tag: tag.to_string(),
+        access: CapAccess::Unrestricted,
+        functions,
+    };
+    db.insert_private_entry(&entry_hash, author, &Entry::CapGrant(grant))
         .await
         .unwrap();
     db.insert_cap_grant(
         action.as_hash(),
         i64::from(CapAccessType::Unrestricted),
-        Some("notary"),
+        Some(tag),
     )
     .await
     .unwrap();
+    action.as_hash().clone()
+}
+
+#[tokio::test]
+async fn capability_grants_report_access_type_and_function_count() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = new_dht_db(tmp.path(), None).await;
+
+    let mut functions = BTreeSet::new();
+    functions.insert(("alliance".into(), "recv_remote_signal".into()));
+    functions.insert(("alliance".into(), "notary_read".into()));
+    commit_unrestricted_grant(
+        &db,
+        0x01,
+        &agent(0x11),
+        0xa1,
+        "notary",
+        GrantedFunctions::Listed(functions.into_iter().collect()),
+    )
+    .await;
 
     let read = open_for_read(tmp.path()).await;
     let grants = extensions::list_capability_grants(&read).await.unwrap();
@@ -769,6 +788,39 @@ async fn capability_grants_report_access_type_and_function_count() {
     assert_eq!(grants[0].tag.as_deref(), Some("notary"));
     assert_eq!(grants[0].access_type, "Unrestricted");
     assert_eq!(grants[0].function_count, 2);
+}
+
+#[tokio::test]
+async fn capability_grants_sharing_a_tag_are_listed_by_their_own_action_hash() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = new_dht_db(tmp.path(), None).await;
+    let author = agent(0x11);
+
+    // The same grant committed twice by one cell: one entry, two actions.
+    let first = commit_unrestricted_grant(
+        &db,
+        0x01,
+        &author,
+        0xa1,
+        "by_progenitor",
+        GrantedFunctions::All,
+    )
+    .await;
+    let second = commit_unrestricted_grant(
+        &db,
+        0x02,
+        &author,
+        0xa1,
+        "by_progenitor",
+        GrantedFunctions::All,
+    )
+    .await;
+
+    let read = open_for_read(tmp.path()).await;
+    let grants = extensions::list_capability_grants(&read).await.unwrap();
+
+    let hashes: Vec<_> = grants.iter().map(|g| g.action_hash.clone()).collect();
+    assert_eq!(hashes, vec![first, second]);
 }
 
 // ---------------------------------------------------------------------------
