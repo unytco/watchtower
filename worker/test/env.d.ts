@@ -6,6 +6,7 @@ declare module "cloudflare:test" {
     SCHEMA_VERSION: string;
     OBSERVER_TS_SKEW_SECS: string;
     ALLOWED_ORIGINS: string;
+    TEST_MIGRATIONS: D1Migration[];
   }
 }
 

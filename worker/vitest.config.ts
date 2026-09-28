@@ -1,6 +1,7 @@
-import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+import path from "node:path";
+import { defineWorkersConfig, readD1Migrations } from "@cloudflare/vitest-pool-workers/config";
 
-export default defineWorkersConfig({
+export default defineWorkersConfig(async () => ({
   test: {
     poolOptions: {
       workers: {
@@ -14,9 +15,10 @@ export default defineWorkersConfig({
             SCHEMA_VERSION: "1",
             OBSERVER_TS_SKEW_SECS: "300",
             ALLOWED_ORIGINS: "http://localhost:5173",
+            TEST_MIGRATIONS: await readD1Migrations(path.join(__dirname, "migrations")),
           },
         },
       },
     },
   },
-});
+}));

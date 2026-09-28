@@ -14,7 +14,7 @@ SCRIPTS  := $(ROOT_DIR)scripts
 
 .PHONY: help install bootstrap bootstrap-d1 bootstrap-pages \
         deploy deploy-worker deploy-dashboard secrets seed-alerts \
-        status login test typecheck
+        status login test typecheck wipe-dna
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -49,6 +49,12 @@ secrets: ## Interactively set Worker secrets (RESEND_API_KEY, ALERT_FROM_ADDRESS
 seed-alerts: ## Provision default alert rules (override with WORKER_URL / RECIPIENT env vars)
 	bash $(SCRIPTS)/seed-alert-rules.sh
 
+wipe-dna: ## Delete one DNA's rows from the remote D1: DNA=<hash>, LOCAL=1 for the local one, YES=1 skips the prompt
+	$(if $(filter command line,$(origin DNA)),,$(error Pass the hash as make wipe-dna DNA=<hash>))
+	$(foreach v,LOCAL YES,$(if $(filter environment%,$(origin $v)),$(error Pass $v on the make command line)))
+	$(if $(filter-out 0 1,$(LOCAL) $(YES)),$(error LOCAL and YES take 0 or 1))
+	bash $(SCRIPTS)/wipe-dna.sh $(if $(filter 1,$(LOCAL)),--local) $(if $(filter 1,$(YES)),--yes) "$$DNA"
+
 status: ## Show recent Worker + Pages deployments
 	@echo "── Worker deployments ──"
 	@cd $(ROOT_DIR)worker && pnpm exec wrangler deployments list 2>/dev/null | head -20 || true
@@ -56,9 +62,10 @@ status: ## Show recent Worker + Pages deployments
 	@echo "── Pages deployments ──"
 	@cd $(ROOT_DIR)dashboard && pnpm exec wrangler pages deployment list --project-name unyt-watchtower-dashboard 2>/dev/null | head -20 || true
 
-test: ## Run Rust + Worker + dashboard tests
+test: ## Run Rust + Worker + operator-script tests
 	cd $(ROOT_DIR) && cargo test --workspace
 	cd $(ROOT_DIR)worker && pnpm test
+	bash $(SCRIPTS)/wipe-dna.test.sh
 
 typecheck: ## Typecheck Worker + dashboard
 	cd $(ROOT_DIR)worker    && pnpm typecheck

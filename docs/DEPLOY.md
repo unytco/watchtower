@@ -177,6 +177,10 @@ pnpm exec wrangler d1 migrations apply watchtower --remote
 
 The command is idempotent; already-applied migrations are skipped.
 
+### Removing a retired DNA
+
+`make wipe-dna DNA=<hash>` deletes one DNA's rows from D1 after showing their counts and asking to confirm; `LOCAL=1` rehearses it against the local D1.
+
 ## Rollback
 
 - Worker: `cd worker && pnpm exec wrangler rollback`.
