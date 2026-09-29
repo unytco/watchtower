@@ -37,8 +37,29 @@ export async function persist(env: Env, payload: IngestPayload): Promise<void> {
         stamp: { updated_at },
       }),
     ),
+    ...supersededGrants(db, observer_id, node.dnas),
     ...node.dnas.flatMap((d) => dnaStatements(db, observer_id, collected_at, d)),
   ]);
+}
+
+/** A grant posted with its hash replaces the observer's row for its tag under '', which /diff would count beside it. */
+function supersededGrants(
+  db: D1Database,
+  observer_id: string,
+  dnas: DnaSnapshot[],
+): D1PreparedStatement[] {
+  const tags = new Set(
+    dnas.flatMap((d) => d.cap_grants.filter((g) => g.action_hash_b64).map((g) => g.tag ?? "")),
+  );
+  if (tags.size === 0) return [];
+  return [
+    db
+      .prepare(
+        `DELETE FROM cap_grants_by_action
+          WHERE observer_id = ? AND action_hash_b64 = '' AND tag IN (SELECT value FROM json_each(?))`,
+      )
+      .bind(observer_id, JSON.stringify([...tags])),
+  ];
 }
 
 function dnaStatements(

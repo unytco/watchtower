@@ -17,3 +17,13 @@ CREATE TABLE IF NOT EXISTS cap_grants_by_action (
   updated_at            TEXT NOT NULL,
   PRIMARY KEY (observer_id, action_hash_b64, tag)
 ) WITHOUT ROWID;
+
+-- Carried under the key the Worker gives a grant posted without a hash, so an
+-- observer that predates action_hash_b64 keeps writing the same row. Where rows
+-- share that key, SQLite takes the other columns from the row MAX(updated_at) picks.
+INSERT OR IGNORE INTO cap_grants_by_action
+  (observer_id, action_hash_b64, tag, app_id, cell_b64, function_count, access_type, updated_at)
+  SELECT observer_id, '', COALESCE(tag, ''), app_id, cell_b64, function_count, access_type,
+         MAX(updated_at)
+    FROM cap_grants
+   GROUP BY observer_id, COALESCE(tag, '');
