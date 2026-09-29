@@ -127,17 +127,65 @@ describe("cap_grants", () => {
     expect(await changedGrants(T4)).toBe(3);
   });
 
-  it("rejects a post holding a grant without action_hash_b64 with a 400 that names the field, and stores no grant or observer row", async () => {
-    const { action_hash_b64: _, ...unhashed } = grant("");
+  it.each([
+    { holding: "no cap_grants", cap_grants: undefined, problem: "has no cap_grants array" },
+    {
+      holding: "cap_grants that is not an array",
+      cap_grants: grant("grant-1"),
+      problem: "has no cap_grants array",
+    },
+    {
+      holding: "a null grant",
+      cap_grants: [grant("grant-1"), null],
+      problem: "has a cap grant that is not an object",
+    },
+    {
+      holding: "a string grant",
+      cap_grants: [grant("grant-1"), "grant-2"],
+      problem: "has a cap grant that is not an object",
+    },
+    {
+      holding: "a grant that is an array",
+      cap_grants: [[grant("grant-1")]],
+      problem: "has a cap grant that is not an object",
+    },
+    {
+      holding: "a grant without action_hash_b64",
+      cap_grants: [grant("grant-1"), { ...grant(""), action_hash_b64: undefined }],
+      problem: "has a cap grant without action_hash_b64",
+    },
+    {
+      holding: "a grant with a null action_hash_b64",
+      cap_grants: [{ ...grant(""), action_hash_b64: null }],
+      problem: "has a cap grant without action_hash_b64",
+    },
+    {
+      holding: "a grant with an empty action_hash_b64",
+      cap_grants: [grant("")],
+      problem: "has a cap grant without action_hash_b64",
+    },
+    {
+      holding: "a grant with a numeric action_hash_b64",
+      cap_grants: [grant("grant-1"), { ...grant(""), action_hash_b64: 7 }],
+      problem: "has a cap grant whose action_hash_b64 is not a string",
+    },
+    {
+      holding: "a grant with a boolean action_hash_b64",
+      cap_grants: [grant("grant-1"), { ...grant(""), action_hash_b64: true }],
+      problem: "has a cap grant whose action_hash_b64 is not a string",
+    },
+  ])(
+    "rejects a post holding $holding with a 400 that says so, and stores no grant or observer row",
+    async ({ cap_grants, problem }) => {
+      const resp = await send(T3, env, GRANTS, cap_grants as unknown as CapGrantSummary[]);
 
-    const resp = await send(T3, env, GRANTS, [unhashed as CapGrantSummary]);
-
-    expect(resp.status).toBe(400);
-    expect(await resp.text()).toBe(`dna ${DNA}-1 has a cap grant without action_hash_b64`);
-    expect(await rows()).toEqual([]);
-    const observers = await env.DB.prepare("SELECT observer_id FROM observers").all();
-    expect(observers.results).toEqual([]);
-  });
+      expect(resp.status).toBe(400);
+      expect(await resp.text()).toBe(`dna ${DNA}-1 ${problem}`);
+      expect(await rows()).toEqual([]);
+      const observers = await env.DB.prepare("SELECT observer_id FROM observers").all();
+      expect(observers.results).toEqual([]);
+    },
+  );
 });
 
 describe("migration 0008", () => {

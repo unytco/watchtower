@@ -107,12 +107,26 @@ export async function verifyAndParse(
       return textResponse(413, `too many rows for dna ${dna.dna_b64}`);
     }
 
-    if (dna.cap_grants.some((g) => !g.action_hash_b64)) {
-      return textResponse(400, `dna ${dna.dna_b64} has a cap grant without action_hash_b64`);
+    const grantProblem = capGrantsProblem(dna.cap_grants);
+    if (grantProblem) {
+      return textResponse(400, `dna ${dna.dna_b64} ${grantProblem}`);
     }
   }
 
   return { payload };
+}
+
+function capGrantsProblem(grants: unknown): string | null {
+  if (!Array.isArray(grants)) return "has no cap_grants array";
+  for (const grant of grants) {
+    if (typeof grant !== "object" || grant === null || Array.isArray(grant)) {
+      return "has a cap grant that is not an object";
+    }
+    const hash = (grant as { action_hash_b64?: unknown }).action_hash_b64;
+    if (hash == null || hash === "") return "has a cap grant without action_hash_b64";
+    if (typeof hash !== "string") return "has a cap grant whose action_hash_b64 is not a string";
+  }
+  return null;
 }
 
 async function fetchObserverSecret(env: Env, observerId: string): Promise<string | null> {
