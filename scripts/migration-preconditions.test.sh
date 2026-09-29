@@ -169,6 +169,11 @@ check "--yes: does not prompt" false "$(says "$PROMPT")"
 check "--yes: applies, then deploys" "list apply list deploy" "$(steps)"
 check "--yes: applied" true "$(applied "$GUARDED")"
 
+make_pending "$GUARDED"
+WRANGLER_LOG=error deploy --yes </dev/null
+check "WRANGLER_LOG=error in the environment: still reads the list" "0 true" "$rc $(applied "$GUARDED")"
+shows_preconditions "WRANGLER_LOG=error in the environment" "$GUARDED"
+
 SECOND=0100_fixture_guarded.sql
 fixture "$SECOND" "-- precondition: The first fixture condition holds." "-- precondition: The second fixture condition holds." \
   "CREATE TABLE IF NOT EXISTS fixture_guarded (x INTEGER);"
