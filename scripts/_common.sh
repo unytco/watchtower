@@ -54,7 +54,7 @@ list_pending_migrations() {
   local listing file
   pending=()
   if ! listing="$(wrangler_in "$WORKER_DIR" d1 migrations list watchtower --remote)"; then
-    err "Listing the migrations pending on the remote D1 failed. Nothing applied or deployed."
+    err "Listing the migrations pending on the remote D1 failed, so this run stops here."
     exit 1
   fi
   for file in "$WORKER_DIR"/migrations/*.sql; do
@@ -66,7 +66,7 @@ list_pending_migrations() {
     [[ ${#pending[@]} -eq 0 && "$listing" == *"No migrations to apply!"* ]]; then
     return 0
   fi
-  err "Could not read which migrations are pending on the remote D1. Nothing applied or deployed. Wrangler said:"
+  err "Could not read which migrations are pending on the remote D1, so this run stops here. Wrangler said:"
   echo "$listing" >&2
   exit 1
 }

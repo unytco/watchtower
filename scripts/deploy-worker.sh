@@ -26,6 +26,12 @@ confirm_pending_preconditions "$assume_yes"
 log "Applying D1 migrations (remote)..."
 wrangler_in "$WORKER_DIR" d1 migrations apply watchtower --remote
 
+list_pending_migrations
+if ((${#pending[@]})); then
+  err "Migrations are still pending after the apply, so the Worker was not deployed: ${pending[*]##*/}"
+  exit 1
+fi
+
 log "Deploying Worker..."
 wrangler_in "$WORKER_DIR" deploy
 

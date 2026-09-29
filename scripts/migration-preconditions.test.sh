@@ -37,6 +37,9 @@ if [[ "$5" == list && -n "${SHIM_LIST:-}" ]]; then
   printf '%s\n' "$SHIM_LIST"
   exit "${SHIM_LIST_RC:-0}"
 fi
+if [[ "$5" == apply && -n "${SHIM_SKIP_APPLY:-}" ]]; then
+  exit 0
+fi
 args=()
 for arg in "$@"; do
   if [[ "$arg" == --remote ]]; then
@@ -107,7 +110,7 @@ check "a pending precondition, answered no: never applies or deploys" "list" "$(
 
 deploy <<<"yes"
 check "a pending precondition, answered yes: exits zero" 0 "$rc"
-check "a pending precondition, answered yes: applies, then deploys" "list apply deploy" "$(steps)"
+check "a pending precondition, answered yes: applies, then deploys" "list apply list deploy" "$(steps)"
 check "a pending precondition, answered yes: both applied" "true true" "$(applied "$GUARDED") $(applied "$UNGUARDED")"
 
 make_pending "$GUARDED"
@@ -115,20 +118,20 @@ deploy --yes </dev/null
 check "--yes: exits zero" 0 "$rc"
 check "--yes: still shows the precondition" true "$(says "    ${FIRST_PRECONDITION}")"
 check "--yes: does not prompt" false "$(says "$PROMPT")"
-check "--yes: applies, then deploys" "list apply deploy" "$(steps)"
+check "--yes: applies, then deploys" "list apply list deploy" "$(steps)"
 check "--yes: applied" true "$(applied "$GUARDED")"
 
 make_pending "$UNGUARDED"
 deploy </dev/null
 check "pending without a precondition: exits zero" 0 "$rc"
 check "pending without a precondition: does not prompt" false "$(says "$PROMPT")"
-check "pending without a precondition: applies, then deploys" "list apply deploy" "$(steps)"
+check "pending without a precondition: applies, then deploys" "list apply list deploy" "$(steps)"
 check "pending without a precondition: applied" true "$(applied "$UNGUARDED")"
 
 deploy </dev/null
 check "nothing pending: exits zero" 0 "$rc"
 check "nothing pending: shows no precondition" false "$(says "precondition. Apply")"
-check "nothing pending: applies, then deploys" "list apply deploy" "$(steps)"
+check "nothing pending: applies, then deploys" "list apply list deploy" "$(steps)"
 
 deploy --force </dev/null
 refused "an unknown argument" "Unknown argument: --force"
@@ -147,6 +150,13 @@ refused "a pending list naming no migration file" "Could not read which migratio
 
 SHIM_LIST="✅ No migrations to apply!"$'\n'"│ ${GUARDED} │" deploy --yes </dev/null
 refused "a list both empty and naming a file" "Could not read which migrations are pending"
+
+make_pending "$UNGUARDED"
+SHIM_SKIP_APPLY=1 deploy </dev/null
+refused "an apply that leaves a migration pending" "still pending after the apply, so the Worker was not deployed: ${UNGUARDED}"
+check "an apply that leaves a migration pending: never deploys" "list apply list" "$(steps)"
+deploy </dev/null
+check "the next deploy applies it" "0 true" "$rc $(applied "$UNGUARDED")"
 
 make_pending "$GUARDED"
 bootstrap </dev/null
