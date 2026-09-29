@@ -34,6 +34,21 @@ wrangler_in() {
   (cd "$dir" && pnpm exec wrangler "$@")
 }
 
+# ask_yes QUESTION UNDONE [ANSWER...]: exits unless the operator types yes or one of ANSWER.
+ask_yes() {
+  local question="$1" undone="$2" answer="" accepted
+  shift 2
+  printf '%s: ' "$question" >&2
+  read -r answer || true
+  for accepted in yes "$@"; do
+    if [[ "$answer" == "$accepted" ]]; then
+      return 0
+    fi
+  done
+  err "Not confirmed. ${undone} Scripted runs pass --yes (make: YES=1)."
+  exit 1
+}
+
 take_yes_flag() {
   assume_yes=false
   while (($#)); do
@@ -72,7 +87,7 @@ list_pending_migrations() {
 }
 
 confirm_pending_preconditions() {
-  local assume_yes="$1" file lines shown="" answer=""
+  local assume_yes="$1" file lines shown=""
   list_pending_migrations
   for file in ${pending[@]+"${pending[@]}"}; do
     lines="$(sed -nE 's/^--[[:space:]]*precondition:[[:space:]]*/    /p' "$file")"
@@ -89,10 +104,5 @@ confirm_pending_preconditions() {
     log "Confirmed by --yes."
     return 0
   fi
-  printf "Type 'yes' to confirm it holds and apply the pending migrations: " >&2
-  read -r answer || true
-  if [[ "$answer" != yes ]]; then
-    err "Not confirmed. Nothing applied or deployed. Scripted runs pass --yes (make: YES=1)."
-    exit 1
-  fi
+  ask_yes "Type 'yes' to confirm it holds and apply the pending migrations" "Nothing applied or deployed."
 }
