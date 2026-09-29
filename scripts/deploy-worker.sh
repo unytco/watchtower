@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_common.sh
 . "${SCRIPT_DIR}/_common.sh"
 
+take_yes_flag "$@"
 require_cmd pnpm
 
 if grep -q '"database_id": "REPLACE_ME_LOCAL_DEV"' "${WORKER_DIR}/wrangler.jsonc"; then
@@ -18,6 +19,9 @@ fi
 
 log "Installing worker dependencies..."
 (cd "$WORKER_DIR" && pnpm install --frozen-lockfile=false)
+
+log "Checking the pending D1 migrations for a precondition..."
+confirm_pending_preconditions "$assume_yes"
 
 log "Applying D1 migrations (remote)..."
 wrangler_in "$WORKER_DIR" d1 migrations apply watchtower --remote

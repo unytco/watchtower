@@ -1,7 +1,10 @@
 -- 0008_cap_grants_keyed_by_action: key each capability grant by the hash of the
 -- action that wrote it, since tags repeat within a node. The old rows carry no
--- hash to rekey them by, so the table is dropped and observers re-post their
--- grants on their next cycle.
+-- hash to rekey them by, so the table is dropped.
+--
+-- precondition: Every observer already runs this release: `make <server>-watchtower` in automation/ for each one.
+-- precondition: Stored grants are dropped, and a post that lands between this migration and the Worker deploy can fail. Each observer re-posts all its grants on its next collection cycle.
+-- precondition: No rollback past this migration: an older Worker cannot store capability grants.
 
 DROP TABLE cap_grants;
 

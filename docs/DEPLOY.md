@@ -99,6 +99,17 @@ make deploy-worker
 make deploy-dashboard
 ```
 
+`make deploy-worker` applies the pending D1 migrations, then deploys the
+Worker. A migration can declare a precondition in `-- precondition:` lines at
+its top. When a pending one does, the deploy prints it and stops until you
+type `yes`, or `YES=1` confirms it for a scripted run.
+
+Migration 0008 declares one. Upgrade every observer first
+(`make <server>-watchtower` in `automation/`), then `make deploy-worker`.
+A post that lands between the migration and the Worker deploy can fail, and
+each observer re-posts all its grants on its next collection cycle. There is
+no rollback past 0008.
+
 `make status` shows the last few Worker and Pages deployments so you can
 confirm what's currently live.
 
@@ -144,7 +155,7 @@ appear in the header switcher within one collection interval (60s by default).
 | Pages custom domain   | Yes (once)   | Dashboard click or `CLOUDFLARE_API_TOKEN` + rerun        |
 | `make install`        | No           |                                                          |
 | `make bootstrap`      | No           | `bootstrap-d1.sh` / `bootstrap-pages.sh` are idempotent  |
-| `make deploy`         | No           |                                                          |
+| `make deploy`         | If needed    | Stops for `yes` when a pending migration has a precondition |
 | `make secrets`        | Yes (once)   | Reads values silently so they don't land in shell history |
 
 ## Troubleshooting
@@ -162,21 +173,17 @@ appear in the header switcher within one collection interval (60s by default).
 
 ### D1 migrations
 
-`make deploy` applies any pending migrations automatically before pushing
-Worker code, so in normal operation you do not need to think about schema
-sync. `deploy-worker.sh` runs the same `wrangler d1 migrations apply
-watchtower --remote` call that `bootstrap-d1.sh` uses, so bootstrap and
-deploy stay in lockstep.
+`make deploy` applies any pending migrations before pushing Worker code,
+once you have confirmed any precondition they declare. `deploy-worker.sh`
+runs the same `wrangler d1 migrations apply watchtower --remote` call that
+`bootstrap-d1.sh` uses, so bootstrap and deploy stay in lockstep.
 
-If you ever need to apply migrations standalone (for example to inspect
-the remote state without deploying code):
+To see what is pending without applying it:
 
 ```bash
 cd watchtower/worker
-pnpm exec wrangler d1 migrations apply watchtower --remote
+pnpm exec wrangler d1 migrations list watchtower --remote
 ```
-
-The command is idempotent; already-applied migrations are skipped.
 
 ### Removing a retired DNA
 

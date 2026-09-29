@@ -12,6 +12,10 @@
 ROOT_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 SCRIPTS  := $(ROOT_DIR)scripts
 
+# A flag left exported from a local rehearsal must not skip a prompt, so flags come from the make command line only.
+check_flags = $(foreach v,$1,$(if $(filter environment%,$(origin $v)),$(error Pass $v on the make command line))$(if $(filter-out 0 1,$($v)),$(error $v takes 0 or 1)))
+yes_flag = $(call check_flags,YES)$(if $(filter 1,$(YES)),--yes)
+
 .PHONY: help install bootstrap bootstrap-d1 bootstrap-pages \
         deploy deploy-worker deploy-dashboard secrets seed-alerts \
         status login test typecheck wipe-dna
@@ -35,13 +39,13 @@ bootstrap-pages: ## One-time: create Pages project `unyt-watchtower-dashboard` +
 
 bootstrap: bootstrap-d1 bootstrap-pages ## One-time: D1 + Pages setup
 
-deploy-worker: ## Deploy the Worker
-	bash $(SCRIPTS)/deploy-worker.sh
+deploy-worker: ## Apply D1 migrations and deploy the Worker; YES=1 confirms a pending migration's precondition
+	bash $(SCRIPTS)/deploy-worker.sh $(yes_flag)
 
 deploy-dashboard: ## Build + deploy the Pages dashboard
 	bash $(SCRIPTS)/deploy-dashboard.sh
 
-deploy: deploy-worker deploy-dashboard ## Deploy both Worker and dashboard
+deploy: deploy-worker deploy-dashboard ## Deploy both Worker and dashboard; YES=1 as for deploy-worker
 
 secrets: ## Interactively set Worker secrets (RESEND_API_KEY, ALERT_FROM_ADDRESS)
 	bash $(SCRIPTS)/secrets.sh
@@ -51,9 +55,8 @@ seed-alerts: ## Provision default alert rules (override with WORKER_URL / RECIPI
 
 wipe-dna: ## Delete one DNA's rows from the remote D1: DNA=<hash>, LOCAL=1 for the local one, YES=1 skips the prompt
 	$(if $(filter command line,$(origin DNA)),,$(error Pass the hash as make wipe-dna DNA=<hash>))
-	$(foreach v,LOCAL YES,$(if $(filter environment%,$(origin $v)),$(error Pass $v on the make command line)))
-	$(if $(filter-out 0 1,$(LOCAL) $(YES)),$(error LOCAL and YES take 0 or 1))
-	bash $(SCRIPTS)/wipe-dna.sh $(if $(filter 1,$(LOCAL)),--local) $(if $(filter 1,$(YES)),--yes) "$$DNA"
+	$(call check_flags,LOCAL)
+	bash $(SCRIPTS)/wipe-dna.sh $(if $(filter 1,$(LOCAL)),--local) $(yes_flag) "$$DNA"
 
 status: ## Show recent Worker + Pages deployments
 	@echo "── Worker deployments ──"
@@ -66,6 +69,7 @@ test: ## Run Rust + Worker + operator-script tests
 	cd $(ROOT_DIR) && cargo test --workspace
 	cd $(ROOT_DIR)worker && pnpm test
 	bash $(SCRIPTS)/wipe-dna.test.sh
+	bash $(SCRIPTS)/migration-preconditions.test.sh
 
 typecheck: ## Typecheck Worker + dashboard
 	cd $(ROOT_DIR)worker    && pnpm typecheck
