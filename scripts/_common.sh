@@ -1,5 +1,5 @@
+# shellcheck shell=bash
 # Shared helpers for bootstrap/deploy scripts. Source with `. scripts/_common.sh`.
-# No shebang: always sourced.
 
 log()  { echo -e "\033[0;32m[watchtower]\033[0m $*"; }
 warn() { echo -e "\033[0;33m[watchtower]\033[0m $*"; }
@@ -7,6 +7,7 @@ err()  { echo -e "\033[0;31m[watchtower]\033[0m $*" >&2; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKER_DIR="${REPO_ROOT}/worker"
+# shellcheck disable=SC2034
 DASHBOARD_DIR="${REPO_ROOT}/dashboard"
 
 # Pages' wrangler.jsonc does not accept `account_id`, and Pages commands
