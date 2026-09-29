@@ -31,8 +31,8 @@ install: ## pnpm install for worker + dashboard
 login: ## Interactive: pnpm wrangler login (once per workstation)
 	cd $(ROOT_DIR)worker && pnpm exec wrangler login
 
-bootstrap-d1: ## One-time: create D1 `watchtower`, patch wrangler.jsonc, apply migrations
-	bash $(SCRIPTS)/bootstrap-d1.sh
+bootstrap-d1: ## One-time: create D1 `watchtower`, patch wrangler.jsonc, apply migrations; YES=1 as for deploy-worker
+	bash $(SCRIPTS)/bootstrap-d1.sh $(yes_flag)
 
 bootstrap-pages: ## One-time: create Pages project `unyt-watchtower-dashboard` + bind watchtower.unyt.dev
 	bash $(SCRIPTS)/bootstrap-pages.sh

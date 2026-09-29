@@ -3,8 +3,9 @@
 # Bootstrap the D1 database `watchtower`:
 #   1. Skip if it already exists in the Cloudflare account.
 #   2. Otherwise create it, extract the database_id, and patch
-#      worker/wrangler.jsonc in place via jq.
-#   3. Apply migrations from worker/migrations/ to the remote DB.
+#      worker/wrangler.jsonc in place.
+#   3. Apply migrations from worker/migrations/ to the remote DB, once the
+#      operator confirms any precondition they declare.
 #
 # Idempotent: safe to re-run.
 set -euo pipefail
@@ -13,6 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_common.sh
 . "${SCRIPT_DIR}/_common.sh"
 
+take_yes_flag "$@"
 require_cmd jq
 require_cmd pnpm
 
@@ -42,8 +44,7 @@ else
 fi
 
 log "Patching worker/wrangler.jsonc with database_id..."
-# jq preserves JSONC comments when given -c? No — jq strips comments.
-# Use sed to keep the file format stable.
+# sed, not jq: jq would reformat the file and drop its comments.
 if grep -q '"database_id": "REPLACE_ME_LOCAL_DEV"' "$WRANGLER_JSONC"; then
   sed -i "s|\"database_id\": \"REPLACE_ME_LOCAL_DEV\"|\"database_id\": \"$DB_ID\"|" "$WRANGLER_JSONC"
   log "database_id written."
@@ -52,6 +53,9 @@ elif grep -q "\"database_id\": \"$DB_ID\"" "$WRANGLER_JSONC"; then
 else
   warn "wrangler.jsonc has a different database_id than $DB_ID; leaving alone."
 fi
+
+log "Checking the pending D1 migrations for a precondition..."
+confirm_pending_preconditions "$assume_yes"
 
 log "Applying D1 migrations (remote)..."
 wrangler_in "$WORKER_DIR" d1 migrations apply watchtower --remote

@@ -72,9 +72,9 @@ make deploy       # deploy Worker + dashboard
 make secrets      # optional: set RESEND_API_KEY + ALERT_FROM_ADDRESS for email alerts
 ```
 
-Each target is idempotent: rerunning `make bootstrap` is a no-op once D1 and
-the Pages project exist, and `make deploy` is what you run every time you
-want to push an update.
+Each target is idempotent: once D1 and the Pages project exist, rerunning
+`make bootstrap` only applies pending migrations, and `make deploy` is what
+you run every time you want to push an update.
 
 ### Sanity check
 
@@ -154,7 +154,7 @@ appear in the header switcher within one collection interval (60s by default).
 | DNS record            | Yes (once)   | Cloudflare dashboard click; could be scripted via API    |
 | Pages custom domain   | Yes (once)   | Dashboard click or `CLOUDFLARE_API_TOKEN` + rerun        |
 | `make install`        | No           |                                                          |
-| `make bootstrap`      | No           | `bootstrap-d1.sh` / `bootstrap-pages.sh` are idempotent  |
+| `make bootstrap`      | If needed    | Idempotent; stops for `yes` as `make deploy` does        |
 | `make deploy`         | If needed    | Stops for `yes` when a pending migration has a precondition |
 | `make secrets`        | Yes (once)   | Reads values silently so they don't land in shell history |
 
@@ -174,9 +174,8 @@ appear in the header switcher within one collection interval (60s by default).
 ### D1 migrations
 
 `make deploy` applies any pending migrations before pushing Worker code,
-once you have confirmed any precondition they declare. `deploy-worker.sh`
-runs the same `wrangler d1 migrations apply watchtower --remote` call that
-`bootstrap-d1.sh` uses, so bootstrap and deploy stay in lockstep.
+once you have confirmed any precondition they declare. `make bootstrap-d1`
+applies them without deploying code, and stops for the same confirmation.
 
 To see what is pending without applying it:
 

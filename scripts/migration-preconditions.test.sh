@@ -21,10 +21,15 @@ shim_bin="${scratch}/bin"
 mkdir "$shim_bin"
 
 # The shim stands in for pnpm: it logs each call, points `d1 migrations` at the local D1 in
-# $SHIM_PERSIST in place of the remote one, and runs nothing else, so nothing is ever deployed.
+# $SHIM_PERSIST in place of the remote one, answers `d1 list` with $SHIM_D1_LIST, and runs
+# nothing else, so nothing is ever created or deployed.
 cat >"${shim_bin}/pnpm" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$SHIM_LOG"
+if [[ "$1 $2 $3 $4" == "exec wrangler d1 list" ]]; then
+  printf '%s\n' "$SHIM_D1_LIST"
+  exit 0
+fi
 if [[ "$1 $2 $3 $4" != "exec wrangler d1 migrations" ]]; then
   exit 0
 fi
@@ -48,7 +53,9 @@ exec "$REAL_PNPM" "${args[@]}"
 EOF
 chmod +x "${shim_bin}/pnpm"
 REAL_PNPM="$(command -v pnpm)"
-export SHIM_LOG="${scratch}/pnpm.log" SHIM_PERSIST="${scratch}/d1" REAL_PNPM
+DB_ID="$(sed -nE 's/.*"database_id": "([^"]+)".*/\1/p' "${WORKER_DIR}/wrangler.jsonc")"
+SHIM_D1_LIST="$(printf '[{"name":"watchtower","uuid":"%s"}]' "$DB_ID")"
+export SHIM_LOG="${scratch}/pnpm.log" SHIM_PERSIST="${scratch}/d1" SHIM_D1_LIST REAL_PNPM
 mkdir "$SHIM_PERSIST"
 
 d1() {
@@ -65,10 +72,18 @@ applied() {
     jq -r '.[0].results[0].n == 1'
 }
 
-deploy() {
+run() {
+  local script="$1"
+  shift
   : >"$SHIM_LOG"
   rc=0
-  out="$(PATH="${shim_bin}:$PATH" bash "${SCRIPT_DIR}/deploy-worker.sh" "$@" 2>&1)" || rc=$?
+  out="$(PATH="${shim_bin}:$PATH" bash "${SCRIPT_DIR}/${script}" "$@" 2>&1)" || rc=$?
+}
+deploy() {
+  run deploy-worker.sh "$@"
+}
+bootstrap() {
+  run bootstrap-d1.sh "$@"
 }
 steps() {
   sed -nE 's/^exec wrangler (d1 migrations (list|apply)|(deploy))( .*)?$/\2\3/p' "$SHIM_LOG" | paste -sd' ' -
@@ -133,6 +148,29 @@ refused "a pending list naming no migration file" "Could not read which migratio
 SHIM_LIST="✅ No migrations to apply!"$'\n'"│ ${GUARDED} │" deploy --yes </dev/null
 refused "a list both empty and naming a file" "Could not read which migrations are pending"
 
+make_pending "$GUARDED"
+bootstrap </dev/null
+refused "bootstrap-d1, a pending precondition, no answer" "Not confirmed. Nothing applied or deployed."
+check "bootstrap-d1, a pending precondition, no answer: shows the precondition" true "$(says "    ${FIRST_PRECONDITION}")"
+check "bootstrap-d1, a pending precondition, no answer: never applies" "list" "$(steps)"
+check "bootstrap-d1, a pending precondition, no answer: nothing applied" false "$(applied "$GUARDED")"
+bootstrap --yes </dev/null
+check "bootstrap-d1 --yes: exits zero" 0 "$rc"
+check "bootstrap-d1 --yes: applies, never deploys" "list apply" "$(steps)"
+check "bootstrap-d1 --yes: applied" true "$(applied "$GUARDED")"
+check "bootstrap-d1 leaves wrangler.jsonc as it was" "" "$(git -C "$REPO_ROOT" status --porcelain -- worker/wrangler.jsonc)"
+bootstrap </dev/null
+check "bootstrap-d1, nothing pending: exits zero" 0 "$rc"
+check "bootstrap-d1, nothing pending: does not prompt" false "$(says "$PROMPT")"
+bootstrap --force </dev/null
+refused "bootstrap-d1, an unknown argument" "Unknown argument: --force"
+
+make_n bootstrap-d1 YES=1
+check "make bootstrap-d1 YES=1 passes --yes" "0 --yes" "$rc $out"
+make_n bootstrap YES=1
+check "make bootstrap YES=1 passes --yes to bootstrap-d1" "0 --yes" "$rc $(head -1 <<<"$out")"
+make_n bootstrap-d1
+check "make bootstrap-d1 prompts" "0 " "$rc $out"
 make_n deploy-worker YES=1
 check "make deploy-worker YES=1 passes --yes" "0 --yes" "$rc $out"
 make_n deploy-worker YES=0
