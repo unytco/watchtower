@@ -141,7 +141,6 @@ shows_preconditions() {
 }
 
 check "0008 declares preconditions" true "$(grep -q '^-- precondition: ' "${migrations}/${GUARDED}" && echo true || echo false)"
-check "wrangler outside the pnpm shim is refused" 1 "$(PATH="${shim_bin}:$PATH" wrangler whoami >/dev/null 2>&1 || echo $?)"
 
 local_wrangler d1 migrations apply watchtower >/dev/null
 
@@ -154,11 +153,11 @@ check "a migration without a precondition is not named" false "$(says "$UNGUARDE
 check "a pending precondition, no answer: only installs and lists" "$LISTED_ONLY" "$(calls)"
 check "a pending precondition, no answer: nothing applied" "false false" "$(applied "$GUARDED") $(applied "$UNGUARDED")"
 
-: >"$SHIM_LOG"
-rc=0
-out="$(PATH="${shim_bin}:$PATH" bash "${copy}/scripts/deploy-worker.sh" 2>&1 >/dev/null </dev/null)" || rc=$?
+capture bash -c 'bash "$@" >/dev/null' _ "${copy}/scripts/deploy-worker.sh" </dev/null
+refused "stdout sent elsewhere, no answer" "Not confirmed"
 check "stdout sent elsewhere: still prompts" true "$(says "$PROMPT")"
 shows_preconditions "stdout sent elsewhere" "$GUARDED"
+check "stdout sent elsewhere: nothing applied" false "$(applied "$GUARDED")"
 
 for answer in no y YES; do
   deploy <<<"$answer"

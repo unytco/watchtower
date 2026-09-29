@@ -1,8 +1,10 @@
 # shellcheck shell=bash
 # Shared checks for the operator-script tests. Source after _common.sh.
 
-# A wrangler call that escapes a test's pnpm shim authenticates with this and fails.
-export CLOUDFLARE_API_TOKEN=operator-script-tests-hold-no-token
+# A wrangler call that escapes a test's pnpm shim authenticates with this token and fails. Wrangler
+# prefers a global API key and email over any token, so those go.
+unset CLOUDFLARE_API_KEY CF_API_KEY CLOUDFLARE_EMAIL CF_EMAIL
+export CLOUDFLARE_API_TOKEN=operator-script-tests-hold-no-token WRANGLER_SEND_METRICS=false
 
 failures=0
 check() {
