@@ -1,8 +1,7 @@
 -- 0008_cap_grants_keyed_by_action: key each capability grant by the hash of the
--- action that wrote it. Observers post app_id and cell_b64 empty, so the old key
--- kept one row per tag and a node's grants sharing a tag overwrote each other.
--- The old rows carry no hash to rekey them by; observers re-post every grant on
--- their next cycle.
+-- action that wrote it, since tags repeat within a node. The old rows carry no
+-- hash to rekey them by, so the table is dropped and observers re-post their
+-- grants on their next cycle.
 
 DROP TABLE cap_grants;
 

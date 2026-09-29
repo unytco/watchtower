@@ -720,9 +720,8 @@ async fn validation_coverage_returns_the_least_witnessed_ops_first() {
     assert_eq!(rows[2].op_hash, op_hash(0x81).get_raw_36().to_vec());
 }
 
-/// `entry_byte` stands in for the entry hash: grants whose content differs need
-/// different bytes, since `PrivateEntry` keeps only the first entry per hash and
-/// author.
+/// `PrivateEntry` keeps the first entry per hash and author, so grants whose
+/// content differs need different `entry_byte`s.
 async fn commit_unrestricted_grant(
     db: &DbWrite<kind::Dht>,
     action_byte: u8,
@@ -796,7 +795,6 @@ async fn capability_grants_sharing_a_tag_are_listed_by_their_own_action_hash() {
     let db = new_dht_db(tmp.path(), None).await;
     let author = agent(0x11);
 
-    // The same grant committed twice by one cell: one entry, two actions.
     let first = commit_unrestricted_grant(
         &db,
         0x01,

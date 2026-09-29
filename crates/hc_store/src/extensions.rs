@@ -307,7 +307,6 @@ pub async fn migration_status_by_author(dht: &HolochainDb) -> HcOpsResult<Vec<Mi
         .map_err(HcOpsError::from)
 }
 
-/// One `CapGrant` index row.
 #[derive(Debug, Clone)]
 pub struct CapGrantRowSummary {
     pub action_hash: ActionHash,

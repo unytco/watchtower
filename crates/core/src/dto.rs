@@ -224,8 +224,8 @@ pub struct ValidationCoverageRow {
 pub struct CapGrantSummary {
     pub app_id: String,
     pub cell_b64: String,
-    /// The `Create` or `Update` that wrote this grant. It keys the grant, as tags
-    /// repeat even within one cell.
+    /// The `Create` or `Update` action this summary reports. The Worker keys on it,
+    /// as tags repeat within a cell.
     pub action_hash_b64: String,
     pub tag: Option<String>,
     pub function_count: u32,

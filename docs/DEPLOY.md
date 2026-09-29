@@ -158,6 +158,7 @@ appear in the header switcher within one collection interval (60s by default).
 | Pages custom domain shows "pending"                 | Cloudflare ACME run. Retry after a few minutes.                     |
 | Observer logs `401 unknown observer`                | D1 `observer_secrets` row missing. Rerun the `*-watchtower` target. |
 | Observer logs `409 schema mismatch`                 | `SCHEMA_VERSION` in `worker/wrangler.jsonc` differs from observer.   |
+| Observer logs `400 … cap grant without action_hash_b64` | The observer predates the Worker. Upgrade it.                    |
 
 ### D1 migrations
 
@@ -183,7 +184,8 @@ The command is idempotent; already-applied migrations are skipped.
 
 ## Rollback
 
-- Worker: `cd worker && pnpm exec wrangler rollback`.
+- Worker: `cd worker && pnpm exec wrangler rollback`. A Worker from before
+  migration 0008 cannot store capability grants, so roll forward past it.
 - Pages: go to the Cloudflare dashboard -> Pages -> `unyt-watchtower-dashboard`
   -> Deployments, click "Rollback" on any previous deployment.
 - D1 schema: there is no automatic down-migration; add a new migration file
