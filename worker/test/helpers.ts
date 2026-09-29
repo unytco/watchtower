@@ -189,14 +189,21 @@ export async function signedRequest(
 }
 
 /**
- * The test `env` with a D1 binding that sums D1's billed `rows_written` and
- * `rows_read` over statements run with `run()`, `all()` or `batch()`. A
- * statement run with `first()`, `raw()` or `exec()` goes uncounted.
+ * The test `env` with a D1 binding that counts the statements run with `run()`,
+ * `all()` or `batch()` and sums D1's billed `rows_written` and `rows_read` over
+ * them. A statement run with `first()`, `raw()` or `exec()` goes uncounted.
  */
-export function meteredEnv(): { env: Env; rowsWritten: () => number; rowsRead: () => number } {
+export function meteredEnv(): {
+  env: Env;
+  rowsWritten: () => number;
+  rowsRead: () => number;
+  statements: () => number;
+} {
   let written = 0;
   let read = 0;
+  let statements = 0;
   const count = <R extends D1Result>(result: R): R => {
+    statements += 1;
     written += result.meta.rows_written;
     read += result.meta.rows_read;
     return result;
@@ -221,7 +228,12 @@ export function meteredEnv(): { env: Env; rowsWritten: () => number; rowsRead: (
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
-  return { env: { ...env, DB }, rowsWritten: () => written, rowsRead: () => read };
+  return {
+    env: { ...env, DB },
+    rowsWritten: () => written,
+    rowsRead: () => read,
+    statements: () => statements,
+  };
 }
 
 function toHex(bytes: Uint8Array): string {

@@ -22,6 +22,7 @@ const T1 = "2026-09-28T10:00:00.000Z";
 const T2 = "2026-09-28T10:05:00.000Z";
 const T3 = "2026-09-28T10:10:00.000Z";
 const T4 = "2026-09-28T10:15:00.000Z";
+const T5 = "2026-09-28T10:20:00.000Z";
 
 function grant(tag: string, fields: Partial<CapGrantSummary> = {}): CapGrantSummary {
   return {
@@ -40,7 +41,7 @@ const SAME_TAG = [
 ];
 const WITHOUT_HASH = [grant("alpha"), grant("beta")];
 
-async function post(collected_at: string, ...grantsPerDna: CapGrantSummary[][]): Promise<number> {
+async function meteredPost(collected_at: string, ...grantsPerDna: CapGrantSummary[][]) {
   const metered = meteredEnv();
   const payload = observerPayload(OBSERVER_ID, collected_at, {
     dnas: grantsPerDna.map((cap_grants, i) => dnaSnapshot(`${DNA}-${i}`, { cap_grants })),
@@ -51,7 +52,15 @@ async function post(collected_at: string, ...grantsPerDna: CapGrantSummary[][]):
     createExecutionContext(),
   );
   expect(resp.status).toBe(200);
-  return metered.rowsWritten();
+  return {
+    written: metered.rowsWritten(),
+    read: metered.rowsRead(),
+    statements: metered.statements(),
+  };
+}
+
+async function post(collected_at: string, ...grantsPerDna: CapGrantSummary[][]): Promise<number> {
+  return (await meteredPost(collected_at, ...grantsPerDna)).written;
 }
 
 /** Rows a post writes when nothing changed: its nonce and the observer's and each DNA's last-seen. */
@@ -59,6 +68,13 @@ async function repeatPostWrites(dnas = 1): Promise<number> {
   const noGrants = Array.from({ length: dnas }, (): CapGrantSummary[] => []);
   await post(T1, ...noGrants);
   return post(T2, ...noGrants);
+}
+
+async function keys(): Promise<Record<string, unknown>[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT observer_id, action_hash_b64, tag FROM cap_grants_by_action ORDER BY 1, 2, 3",
+  ).all();
+  return results;
 }
 
 async function rows(): Promise<Record<string, unknown>[]> {
@@ -101,6 +117,63 @@ describe("cap_grants_by_action", () => {
 
     expect(await post(T4, WITHOUT_HASH)).toBe(liveness);
     expect(await rows()).toEqual(stored);
+  });
+
+  it.each([
+    ["with", true],
+    ["without", false],
+  ])(
+    "a repeat post of grants %s hashes runs one cleanup statement and reads as many rows for twenty tags as for one",
+    async (_, hashed) => {
+      const grants = (n: number) =>
+        Array.from({ length: n }, (_, i) =>
+          grant(`tag-${i}`, hashed ? { action_hash_b64: `grant-${i}` } : {}),
+        );
+      await post(T1, grants(1));
+      const one = await meteredPost(T2, grants(1));
+      await post(T3, grants(20));
+      const twenty = await meteredPost(T4, grants(20));
+      const none = await meteredPost(T5, []);
+
+      expect(twenty.written).toBe(none.written);
+      expect(twenty.read).toBe(one.read);
+      expect(twenty.statements).toBe(none.statements + 20 + 1);
+    },
+  );
+
+  it("replaces an observer's hashed rows for a tag it posts again without the hash, as after a rollback", async () => {
+    const liveness = await repeatPostWrites();
+    await post(T3, SAME_TAG);
+
+    expect(await post(T4, [grant("by_progenitor")])).toBe(liveness + 1 + 2);
+    const stored = [
+      { action_hash_b64: "", tag: "by_progenitor", function_count: 1, updated_at: T4 },
+    ];
+    expect(await rows()).toEqual(stored);
+    expect(await changedGrants(T1)).toBe(1);
+
+    expect(await post(T5, [grant("by_progenitor")])).toBe(liveness);
+    expect(await rows()).toEqual(stored);
+  });
+
+  it("replaces only the posting observer's hashed rows for the tags it posts without the hash, a null tag as ''", async () => {
+    await env.DB.prepare(
+      `INSERT INTO cap_grants_by_action
+         (observer_id, action_hash_b64, tag, app_id, cell_b64, function_count, access_type, updated_at)
+       VALUES ('other-observer', 'other-grant', '', '', '', 1, 'Unrestricted', ?)`,
+    )
+      .bind(T1)
+      .run();
+    await post(T3, [...SAME_TAG, grant("", { tag: null, action_hash_b64: "untagged" })]);
+
+    await post(T4, [grant("", { tag: null })]);
+
+    expect(await keys()).toEqual([
+      { observer_id: OBSERVER_ID, action_hash_b64: "", tag: "" },
+      { observer_id: OBSERVER_ID, action_hash_b64: "grant-1", tag: "by_progenitor" },
+      { observer_id: OBSERVER_ID, action_hash_b64: "grant-2", tag: "by_progenitor" },
+      { observer_id: "other-observer", action_hash_b64: "other-grant", tag: "" },
+    ]);
   });
 });
 
@@ -170,10 +243,7 @@ describe("migration 0008", () => {
     await applyPendingMigrations();
     expect(await post(T3, SAME_TAG, inSecondDna)).toBe(liveness + 3 + 2);
 
-    const { results } = await env.DB.prepare(
-      "SELECT observer_id, action_hash_b64, tag FROM cap_grants_by_action ORDER BY 1, 2, 3",
-    ).all();
-    expect(results).toEqual([
+    expect(await keys()).toEqual([
       { observer_id: OBSERVER_ID, action_hash_b64: "", tag: "unposted" },
       { observer_id: OBSERVER_ID, action_hash_b64: "grant-1", tag: "by_progenitor" },
       { observer_id: OBSERVER_ID, action_hash_b64: "grant-2", tag: "by_progenitor" },

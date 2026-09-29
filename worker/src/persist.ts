@@ -42,24 +42,36 @@ export async function persist(env: Env, payload: IngestPayload): Promise<void> {
   ]);
 }
 
-/** A grant posted with its hash replaces the observer's row for its tag under '', which /diff would count beside it. */
+/**
+ * A grant posted with its hash replaces the observer's row for its tag under '', and one posted
+ * without replaces its rows under a hash, as after a rollback. /diff would count both.
+ */
 function supersededGrants(
   db: D1Database,
   observer_id: string,
   dnas: DnaSnapshot[],
 ): D1PreparedStatement[] {
-  const tags = new Set(
-    dnas.flatMap((d) => d.cap_grants.filter((g) => g.action_hash_b64).map((g) => g.tag ?? "")),
-  );
-  if (tags.size === 0) return [];
+  const grants = dnas.flatMap((d) => d.cap_grants);
+  // With no rows left under the replaced form, reads stay flat: `> ''` is a key range where
+  // `<> ''` is not, and `+tag` stops a key probe per tag, which D1 bills as a row read. Rows left
+  // there, such as a revoked grant's, add their count and the tag count to every post.
   return [
-    db
-      .prepare(
-        `DELETE FROM cap_grants_by_action
-          WHERE observer_id = ? AND action_hash_b64 = '' AND tag IN (SELECT value FROM json_each(?))`,
-      )
-      .bind(observer_id, JSON.stringify([...tags])),
-  ];
+    { hashed: true, replaced: "action_hash_b64 = ''" },
+    { hashed: false, replaced: "action_hash_b64 > ''" },
+  ].flatMap(({ hashed, replaced }) => {
+    const tags = new Set(
+      grants.filter((g) => Boolean(g.action_hash_b64) === hashed).map((g) => g.tag ?? ""),
+    );
+    if (tags.size === 0) return [];
+    return [
+      db
+        .prepare(
+          `DELETE FROM cap_grants_by_action
+            WHERE observer_id = ? AND ${replaced} AND +tag IN (SELECT value FROM json_each(?))`,
+        )
+        .bind(observer_id, JSON.stringify([...tags])),
+    ];
+  });
 }
 
 function dnaStatements(
