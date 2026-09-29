@@ -184,8 +184,8 @@ The command is idempotent; already-applied migrations are skipped.
 
 ## Rollback
 
-- Worker: `cd worker && pnpm exec wrangler rollback`. A Worker from before
-  migration 0008 cannot store capability grants, so roll forward past it.
+- Worker: `cd worker && pnpm exec wrangler rollback`. Once migration 0008
+  is applied, an older Worker cannot store capability grants, so roll forward.
 - Pages: go to the Cloudflare dashboard -> Pages -> `unyt-watchtower-dashboard`
   -> Deployments, click "Rollback" on any previous deployment.
 - D1 schema: there is no automatic down-migration; add a new migration file
