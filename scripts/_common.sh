@@ -63,14 +63,16 @@ take_yes_flag() {
   done
 }
 
-# Sets `pending` to the files `d1 migrations apply watchtower --remote` would apply, read from the
-# table wrangler's own list prints. The list has no JSON form, so a table this does not recognise,
-# or a row naming no file, stops the run instead of passing for an empty list.
+# list_pending_migrations STOPPED: sets `pending` to the files `d1 migrations apply watchtower --remote`
+# would apply, read from the table wrangler's own list prints. The list has no JSON form, so a table
+# this does not recognise, or a row naming no file, stops the run with STOPPED instead of passing
+# for an empty list.
 list_pending_migrations() {
-  local listing rows name
+  local stopped="$1" listing rows name
   pending=()
   if ! listing="$(WRANGLER_LOG=log wrangler_in "$WORKER_DIR" d1 migrations list watchtower --remote)"; then
-    err "Listing the migrations pending on the remote D1 failed, so this run stops here."
+    err "Listing the migrations pending on the remote D1 failed. ${stopped} If wrangler says you are not logged in, run make login."
+    echo "$listing" >&2
     exit 1
   fi
   rows="$(sed -nE 's/^│ (.*[^ ]) +│$/\1/p' <<<"$listing")"
@@ -89,18 +91,18 @@ list_pending_migrations() {
       return 0
     fi
   fi
-  err "Could not read which migrations are pending on the remote D1, so this run stops here. Wrangler said:"
+  err "Could not read which migrations are pending on the remote D1. ${stopped} Wrangler said:"
   echo "$listing" >&2
   exit 1
 }
 
 confirm_pending_preconditions() {
   local assume_yes="$1" file unread shown=""
-  list_pending_migrations
+  list_pending_migrations "Nothing applied or deployed."
   for file in ${pending[@]+"${pending[@]}"}; do
     unread="$(grep -i precondition "$file" | grep -v '^-- precondition: ' || true)"
     if [[ -n "$unread" ]]; then
-      err "${file##*/} mentions a precondition in a form this cannot read, so this run stops here. Write each as '-- precondition: <text>':"
+      err "${file##*/} mentions a precondition in a form this cannot read. Nothing applied or deployed. Write each as '-- precondition: <text>':"
       echo "$unread" >&2
       exit 1
     fi
@@ -118,4 +120,20 @@ confirm_pending_preconditions() {
     return 0
   fi
   ask_yes "Type 'yes' to accept them and apply the pending migrations" "Nothing applied or deployed."
+}
+
+# apply_pending_migrations STOPPED: applies the pending migrations, then stops the run with STOPPED
+# while any remain, since wrangler exits 0 when its own "continue?" is answered no.
+apply_pending_migrations() {
+  local stopped="$1"
+  log "Applying D1 migrations (remote)..."
+  if ! wrangler_in "$WORKER_DIR" d1 migrations apply watchtower --remote; then
+    err "Applying the migrations failed. ${stopped}"
+    exit 1
+  fi
+  list_pending_migrations "$stopped"
+  if ((${#pending[@]})); then
+    err "Migrations are still pending after the apply: ${pending[*]##*/}. ${stopped}"
+    exit 1
+  fi
 }

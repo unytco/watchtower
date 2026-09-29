@@ -20,17 +20,9 @@ fi
 log "Installing worker dependencies..."
 (cd "$WORKER_DIR" && pnpm install --frozen-lockfile=false)
 
-log "Checking the pending D1 migrations for a precondition..."
+log "Checking the pending D1 migrations for preconditions..."
 confirm_pending_preconditions "$assume_yes"
-
-log "Applying D1 migrations (remote)..."
-wrangler_in "$WORKER_DIR" d1 migrations apply watchtower --remote
-
-list_pending_migrations
-if ((${#pending[@]})); then
-  err "Migrations are still pending after the apply, so the Worker was not deployed: ${pending[*]##*/}"
-  exit 1
-fi
+apply_pending_migrations "The Worker was not deployed. Run make deploy-worker again."
 
 log "Deploying Worker..."
 wrangler_in "$WORKER_DIR" deploy

@@ -54,10 +54,8 @@ else
   warn "wrangler.jsonc has a different database_id than $DB_ID; leaving alone."
 fi
 
-log "Checking the pending D1 migrations for a precondition..."
+log "Checking the pending D1 migrations for preconditions..."
 confirm_pending_preconditions "$assume_yes"
-
-log "Applying D1 migrations (remote)..."
-wrangler_in "$WORKER_DIR" d1 migrations apply watchtower --remote
+apply_pending_migrations "The D1 bootstrap is not complete. Run make bootstrap-d1 again."
 
 log "D1 bootstrap complete."

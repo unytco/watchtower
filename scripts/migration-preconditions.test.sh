@@ -44,14 +44,22 @@ case "$1 $2 $3 $4 $5" in
     exit 0
     ;;
   "exec wrangler d1 migrations list")
+    if [[ "$(grep -c ' d1 migrations list ' "$SHIM_LOG")" == "${SHIM_FAIL_LIST_CALL:-}" ]]; then
+      echo "✘ [ERROR] Authentication error" >&2
+      exit 1
+    fi
     if [[ -n "${SHIM_LIST:-}" ]]; then
       printf '%s\n' "$SHIM_LIST"
-      exit "${SHIM_LIST_RC:-0}"
+      exit 0
     fi
     ;;
   "exec wrangler d1 migrations apply")
     if [[ -n "${SHIM_SKIP_APPLY:-}" ]]; then
       exit 0
+    fi
+    if [[ -n "${SHIM_FAIL_APPLY:-}" ]]; then
+      echo "✘ [ERROR] A statement failed" >&2
+      exit 1
     fi
     ;;
   *) exit 0 ;;
@@ -210,8 +218,15 @@ check "nothing pending: applies, then deploys" "list apply list deploy" "$(steps
 
 make_pending "$UNGUARDED"
 SHIM_SKIP_APPLY=1 deploy </dev/null
-refused "an apply that leaves a migration pending" "still pending after the apply, so the Worker was not deployed: ${UNGUARDED}"
+refused "an apply that leaves a migration pending" "still pending after the apply: ${UNGUARDED}. The Worker was not deployed."
 check "an apply that leaves a migration pending: never deploys" "list apply list" "$(steps)"
+SHIM_FAIL_APPLY=1 deploy </dev/null
+refused "a failed apply" "Applying the migrations failed. The Worker was not deployed."
+check "a failed apply: never deploys" "list apply" "$(steps)"
+SHIM_FAIL_LIST_CALL=2 deploy </dev/null
+refused "a failed list after the apply" "Listing the migrations pending on the remote D1 failed. The Worker was not deployed."
+check "a failed list after the apply: never deploys" "list apply list" "$(steps)"
+make_pending "$UNGUARDED"
 deploy </dev/null
 check "the next deploy applies it" "0 true" "$rc $(applied "$UNGUARDED")"
 
@@ -219,8 +234,9 @@ deploy --force </dev/null
 refused "an unknown argument" "Unknown argument: --force"
 check "an unknown argument: runs nothing" "" "$(calls)"
 
-SHIM_LIST="✘ [ERROR] Authentication error" SHIM_LIST_RC=1 deploy --yes </dev/null
-refused "a failed list" "Listing the migrations pending on the remote D1 failed"
+SHIM_FAIL_LIST_CALL=1 deploy --yes </dev/null
+refused "a failed list" "Listing the migrations pending on the remote D1 failed. Nothing applied or deployed."
+check "a failed list: points at make login" true "$(says "run make login")"
 check "a failed list: only installs and lists" "$LISTED_ONLY" "$(calls)"
 
 table() {
@@ -257,17 +273,25 @@ check "bootstrap-d1, a pending precondition, no answer: only finds the D1 and li
 check "bootstrap-d1, a pending precondition, no answer: nothing applied" false "$(applied "$GUARDED")"
 bootstrap --yes </dev/null
 check "bootstrap-d1 --yes: exits zero" 0 "$rc"
-check "bootstrap-d1 --yes: applies, never deploys" "list apply" "$(steps)"
+check "bootstrap-d1 --yes: applies, rechecks, never deploys" "list apply list" "$(steps)"
 check "bootstrap-d1 --yes: applied" true "$(applied "$GUARDED")"
 check "bootstrap-d1 leaves wrangler.jsonc as it was" true "$(cmp -s "${WORKER_DIR}/wrangler.jsonc" "${copy}/worker/wrangler.jsonc" && echo true || echo false)"
 bootstrap </dev/null
 check "bootstrap-d1, nothing pending: exits zero" 0 "$rc"
 check "bootstrap-d1, nothing pending: does not prompt" false "$(says "$PROMPT")"
+make_pending "$UNGUARDED"
+SHIM_SKIP_APPLY=1 bootstrap </dev/null
+refused "bootstrap-d1, an apply that leaves a migration pending" "still pending after the apply: ${UNGUARDED}. The D1 bootstrap is not complete."
+check "bootstrap-d1, an apply that leaves a migration pending: never says complete" false "$(says "D1 bootstrap complete.")"
+bootstrap </dev/null
+check "bootstrap-d1, the next run applies it" "0 true" "$rc $(applied "$UNGUARDED")"
 bootstrap --force </dev/null
 refused "bootstrap-d1, an unknown argument" "Unknown argument: --force"
 
 cp "${REPO_ROOT}/Makefile" "${copy}/"
-echo 'echo deploy-dashboard >>"$SHIM_LOG"' >"${copy}/scripts/deploy-dashboard.sh"
+cat >"${copy}/scripts/deploy-dashboard.sh" <<'EOF'
+echo deploy-dashboard >>"$SHIM_LOG"
+EOF
 make_deploy() {
   : >"$SHIM_LOG"
   rc=0
