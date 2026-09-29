@@ -110,12 +110,15 @@ fixture() {
   printf '%s\n' "$@" >"${migrations}/${name}"
 }
 
+capture() {
+  : >"$SHIM_LOG"
+  rc=0
+  out="$(PATH="${shim_bin}:$PATH" "$@" 2>&1)" || rc=$?
+}
 run() {
   local script="$1"
   shift
-  : >"$SHIM_LOG"
-  rc=0
-  out="$(PATH="${shim_bin}:$PATH" bash "${copy}/scripts/${script}" "$@" 2>&1)" || rc=$?
+  capture bash "${copy}/scripts/${script}" "$@"
 }
 deploy() {
   run deploy-worker.sh "$@"
@@ -297,18 +300,15 @@ cp "${REPO_ROOT}/Makefile" "${copy}/"
 cat >"${copy}/scripts/deploy-dashboard.sh" <<'EOF'
 echo deploy-dashboard >>"$SHIM_LOG"
 EOF
-make_deploy() {
-  : >"$SHIM_LOG"
-  rc=0
-  out="$(PATH="${shim_bin}:$PATH" make -s -C "$copy" "$@" 2>&1 </dev/null)" || rc=$?
-}
 make_pending "$GUARDED"
 for flag in -k -j2; do
-  make_deploy "$flag" deploy
-  check "make ${flag} deploy after a refusal: fails and never deploys the dashboard" "2 false" "$rc $(logged deploy-dashboard)"
+  capture make -s -C "$copy" "$flag" deploy </dev/null
+  check "make ${flag} deploy after a refusal: fails and never deploys the dashboard" "2 true false" "$rc $(says "Not confirmed") $(logged deploy-dashboard)"
 done
-make_deploy deploy YES=1
+capture make -s -C "$copy" deploy YES=1 </dev/null
 check "make deploy YES=1: the dashboard deploys after the Worker" "0 exec wrangler deploy|deploy-dashboard" "$rc $(tail -2 "$SHIM_LOG" | paste -sd'|' -)"
+capture make -s -C "$scratch" -f "${copy}/Makefile" deploy </dev/null
+check "make -f from another directory: deploys the dashboard" "0 true" "$rc $(logged deploy-dashboard)"
 
 make_n bootstrap-d1 YES=1
 check "make bootstrap-d1 YES=1 passes --yes" "0 bootstrap-d1.sh --yes" "$rc $out"
@@ -326,6 +326,8 @@ make_n deploy YES=1
 check "make deploy YES=1 passes --yes to deploy-worker" "0 deploy-worker.sh --yes" "$rc $(head -1 <<<"$out")"
 make_n deploy-worker YES=true
 check "make deploy-worker YES=true is refused" "2 true" "$rc $(says "YES takes 0 or 1")"
+make_n deploy-worker "YES=0 1"
+check "make deploy-worker YES='0 1' is refused" "2 true" "$rc $(says "YES takes 0 or 1")"
 rc=0
 out="$(env YES=1 make -s -n -C "$REPO_ROOT" deploy-worker 2>&1)" || rc=$?
 check "make deploy-worker with YES only in the environment is refused" "2 true" "$rc $(says "Pass YES on the make command line")"

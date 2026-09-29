@@ -9,11 +9,12 @@
 # Redeploy later:
 #   make deploy
 
-ROOT_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+THIS_MAKEFILE := $(abspath $(lastword $(MAKEFILE_LIST)))
+ROOT_DIR := $(dir $(THIS_MAKEFILE))
 SCRIPTS  := $(ROOT_DIR)scripts
 
-# A flag left exported from a local rehearsal must not skip a prompt, so flags come from the make command line only.
-check_flags = $(foreach v,$1,$(if $(filter environment%,$(origin $v)),$(error Pass $v on the make command line))$(if $(filter-out 0 1,$($v)),$(error $v takes 0 or 1)))
+# Flags come from the make command line only, so one left exported in the shell cannot skip a prompt or retarget a run.
+check_flags = $(foreach v,$1,$(if $(filter environment%,$(origin $v)),$(error Pass $v on the make command line))$(if $(filter-out 0 1,$($v))$(word 2,$($v)),$(error $v takes 0 or 1)))
 yes_flag = $(call check_flags,YES)$(if $(filter 1,$(YES)),--yes)
 
 .PHONY: help install bootstrap bootstrap-d1 bootstrap-pages \
@@ -47,7 +48,7 @@ deploy-dashboard: ## Build + deploy the Pages dashboard
 
 # The dashboard deploys only once the Worker has, even under -j or -k.
 deploy: deploy-worker ## Deploy both Worker and dashboard; YES=1 as for deploy-worker
-	$(MAKE) --no-print-directory deploy-dashboard
+	$(MAKE) --no-print-directory -f $(THIS_MAKEFILE) deploy-dashboard
 
 secrets: ## Interactively set Worker secrets (RESEND_API_KEY, ALERT_FROM_ADDRESS)
 	bash $(SCRIPTS)/secrets.sh
