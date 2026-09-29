@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The Activity tab counts capability grants that share a tag as separate grants. Needs D1 migration `0008_cap_grants_by_action.sql`, applied on redeploy.
+- The Activity tab counts capability grants that share a tag as separate grants. Needs D1 migration `0008_cap_grants_keyed_by_action.sql`, applied on redeploy, and observers from this release.
 - The Activity tab counts only new or changed rows, apart from DNAs seen.
 - D1 migration `0007_ingest_nonces_without_rowid.sql`. Apply on redeploy.
 - D1 migration `0006_bridge_unclassified_streak.sql`: `bridge_services` gains `unclassified_active` and `unclassified_consecutive` (INTEGER, default 0). Apply on redeploy.

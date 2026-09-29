@@ -1,9 +1,8 @@
 import { SELF, applyD1Migrations, createExecutionContext, env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker from "../src/index";
-import { upsertIfChanged } from "../src/write";
 import schemaSql from "../src/schema.sql?raw";
-import type { CapGrantSummary } from "../src/types";
+import type { CapGrantSummary, Env } from "../src/types";
 import {
   applySql,
   dnaSnapshot,
@@ -22,176 +21,51 @@ const T1 = "2026-09-28T10:00:00.000Z";
 const T2 = "2026-09-28T10:05:00.000Z";
 const T3 = "2026-09-28T10:10:00.000Z";
 const T4 = "2026-09-28T10:15:00.000Z";
-const T5 = "2026-09-28T10:20:00.000Z";
 
-function grant(tag: string, fields: Partial<CapGrantSummary> = {}): CapGrantSummary {
+function grant(action_hash_b64: string, fields: Partial<CapGrantSummary> = {}): CapGrantSummary {
   return {
     app_id: "",
     cell_b64: "",
-    tag,
+    action_hash_b64,
+    tag: "by_progenitor",
     function_count: 1,
     access_type: "Unrestricted",
     ...fields,
   };
 }
 
-const SAME_TAG = [
-  grant("by_progenitor", { action_hash_b64: "grant-1", function_count: 1 }),
-  grant("by_progenitor", { action_hash_b64: "grant-2", function_count: 2 }),
-];
-const WITHOUT_HASH = [grant("alpha"), grant("beta")];
+const SAME_TAG = [grant("grant-1"), grant("grant-2", { function_count: 2 })];
 
-async function meteredPost(collected_at: string, ...grantsPerDna: CapGrantSummary[][]) {
-  const metered = meteredEnv();
+async function send(collected_at: string, dbEnv: Env, ...grantsPerDna: CapGrantSummary[][]) {
   const payload = observerPayload(OBSERVER_ID, collected_at, {
     dnas: grantsPerDna.map((cap_grants, i) => dnaSnapshot(`${DNA}-${i}`, { cap_grants })),
   });
-  const resp = await worker.fetch(
+  return worker.fetch(
     await signedRequest("/ingest", OBSERVER_ID, SECRET_HEX, payload),
-    metered.env,
+    dbEnv,
     createExecutionContext(),
   );
-  expect(resp.status).toBe(200);
-  return {
-    written: metered.rowsWritten(),
-    read: metered.rowsRead(),
-    statements: metered.statements(),
-  };
 }
 
+/** Rows the post wrote. */
 async function post(collected_at: string, ...grantsPerDna: CapGrantSummary[][]): Promise<number> {
-  return (await meteredPost(collected_at, ...grantsPerDna)).written;
+  const metered = meteredEnv();
+  const resp = await send(collected_at, metered.env, ...grantsPerDna);
+  expect(resp.status).toBe(200);
+  return metered.rowsWritten();
 }
 
-/** Rows a post writes when nothing changed: its nonce and the observer's and each DNA's last-seen. */
-async function repeatPostWrites(dnas = 1): Promise<number> {
-  const noGrants = Array.from({ length: dnas }, (): CapGrantSummary[] => []);
-  await post(T1, ...noGrants);
-  return post(T2, ...noGrants);
-}
-
-async function keys(): Promise<Record<string, unknown>[]> {
-  const { results } = await env.DB.prepare(
-    "SELECT observer_id, action_hash_b64, tag FROM cap_grants_by_action ORDER BY 1, 2, 3",
-  ).all();
-  return results;
+/** Rows a post writes when nothing changed: its nonce and the observer's and the DNA's last-seen. */
+async function repeatPostWrites(): Promise<number> {
+  await post(T1, []);
+  return post(T2, []);
 }
 
 async function rows(): Promise<Record<string, unknown>[]> {
   const { results } = await env.DB.prepare(
-    `SELECT action_hash_b64, tag, function_count, updated_at FROM cap_grants_by_action
-      ORDER BY action_hash_b64, tag`,
+    `SELECT action_hash_b64, tag, function_count, updated_at FROM cap_grants
+      ORDER BY action_hash_b64`,
   ).all();
-  return results;
-}
-
-describe("cap_grants_by_action", () => {
-  beforeAll(async () => {
-    await applySql(schemaSql);
-    await registerObserver(OBSERVER_ID, SECRET_HEX);
-  });
-
-  it("stores grants that share a tag as one row each, one write apiece, and rewrites neither on a repeat post", async () => {
-    const liveness = await repeatPostWrites();
-
-    expect(await post(T3, SAME_TAG)).toBe(liveness + 2);
-    const stored = [
-      { action_hash_b64: "grant-1", tag: "by_progenitor", function_count: 1, updated_at: T3 },
-      { action_hash_b64: "grant-2", tag: "by_progenitor", function_count: 2, updated_at: T3 },
-    ];
-    expect(await rows()).toEqual(stored);
-
-    expect(await post(T4, SAME_TAG)).toBe(liveness);
-    expect(await rows()).toEqual(stored);
-  });
-
-  it("keeps one row per tag for an observer that predates the action hash", async () => {
-    const liveness = await repeatPostWrites();
-
-    await post(T3, WITHOUT_HASH);
-    const stored = [
-      { action_hash_b64: "", tag: "alpha", function_count: 1, updated_at: T3 },
-      { action_hash_b64: "", tag: "beta", function_count: 1, updated_at: T3 },
-    ];
-    expect(await rows()).toEqual(stored);
-
-    expect(await post(T4, WITHOUT_HASH)).toBe(liveness);
-    expect(await rows()).toEqual(stored);
-  });
-
-  it.each([
-    ["with", true],
-    ["without", false],
-  ])(
-    "a repeat post of grants %s hashes runs one cleanup statement and reads as many rows for twenty tags as for one",
-    async (_, hashed) => {
-      const grants = (n: number) =>
-        Array.from({ length: n }, (_, i) =>
-          grant(`tag-${i}`, hashed ? { action_hash_b64: `grant-${i}` } : {}),
-        );
-      await post(T1, grants(1));
-      const one = await meteredPost(T2, grants(1));
-      await post(T3, grants(20));
-      const twenty = await meteredPost(T4, grants(20));
-      const none = await meteredPost(T5, []);
-
-      expect(twenty.written).toBe(none.written);
-      expect(twenty.read).toBe(one.read);
-      expect(twenty.statements).toBe(none.statements + 20 + 1);
-    },
-  );
-
-  it("replaces an observer's hashed rows for a tag it posts again without the hash, as after a rollback", async () => {
-    const liveness = await repeatPostWrites();
-    await post(T3, SAME_TAG);
-
-    expect(await post(T4, [grant("by_progenitor")])).toBe(liveness + 1 + 2);
-    const stored = [
-      { action_hash_b64: "", tag: "by_progenitor", function_count: 1, updated_at: T4 },
-    ];
-    expect(await rows()).toEqual(stored);
-    expect(await changedGrants(T1)).toBe(1);
-
-    expect(await post(T5, [grant("by_progenitor")])).toBe(liveness);
-    expect(await rows()).toEqual(stored);
-  });
-
-  it("replaces only the posting observer's hashed rows for the tags it posts without the hash, a null tag as ''", async () => {
-    await env.DB.prepare(
-      `INSERT INTO cap_grants_by_action
-         (observer_id, action_hash_b64, tag, app_id, cell_b64, function_count, access_type, updated_at)
-       VALUES ('other-observer', 'other-grant', '', '', '', 1, 'Unrestricted', ?)`,
-    )
-      .bind(T1)
-      .run();
-    await post(T3, [...SAME_TAG, grant("", { tag: null, action_hash_b64: "untagged" })]);
-
-    await post(T4, [grant("", { tag: null })]);
-
-    expect(await keys()).toEqual([
-      { observer_id: OBSERVER_ID, action_hash_b64: "", tag: "" },
-      { observer_id: OBSERVER_ID, action_hash_b64: "grant-1", tag: "by_progenitor" },
-      { observer_id: OBSERVER_ID, action_hash_b64: "grant-2", tag: "by_progenitor" },
-      { observer_id: "other-observer", action_hash_b64: "other-grant", tag: "" },
-    ]);
-  });
-});
-
-function oldWorkerWrite(
-  tag: string,
-  function_count: number,
-  updated_at: string,
-  observer_id = OBSERVER_ID,
-) {
-  return upsertIfChanged(env.DB, "cap_grants", {
-    key: { observer_id, app_id: "", cell_b64: "", tag },
-    content: { function_count, access_type: "Unrestricted" },
-    stamp: { updated_at },
-  }).run();
-}
-
-async function legacyRows(): Promise<Record<string, unknown>[]> {
-  const { results } = await env.DB.prepare("SELECT tag, function_count FROM cap_grants").all();
   return results;
 }
 
@@ -203,9 +77,63 @@ async function changedGrants(since: string): Promise<number> {
   return changed.cap_grants;
 }
 
-describe("migration 0008", () => {
-  const applyPendingMigrations = () => applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+describe("cap_grants", () => {
+  beforeAll(async () => {
+    await applySql(schemaSql);
+    await registerObserver(OBSERVER_ID, SECRET_HEX);
+  });
 
+  it("stores grants that share a tag as one row each, one write apiece, and rewrites none on a repeat post", async () => {
+    const liveness = await repeatPostWrites();
+    const grants = [...SAME_TAG, grant("untagged", { tag: null })];
+
+    expect(await post(T3, grants)).toBe(liveness + 3);
+    const stored = [
+      { action_hash_b64: "grant-1", tag: "by_progenitor", function_count: 1, updated_at: T3 },
+      { action_hash_b64: "grant-2", tag: "by_progenitor", function_count: 2, updated_at: T3 },
+      { action_hash_b64: "untagged", tag: null, function_count: 1, updated_at: T3 },
+    ];
+    expect(await rows()).toEqual(stored);
+    expect(await changedGrants(T3)).toBe(3);
+
+    expect(await post(T4, grants)).toBe(liveness);
+    expect(await rows()).toEqual(stored);
+    expect(await changedGrants(T4)).toBe(0);
+  });
+
+  it("updates a grant whose tag or function count changed in place, and leaves the others alone", async () => {
+    const liveness = await repeatPostWrites();
+    await post(T3, SAME_TAG);
+
+    const changed = [
+      grant("grant-1", { tag: "renamed" }),
+      grant("grant-2", { function_count: 3 }),
+      grant("grant-3"),
+    ];
+    expect(await post(T4, changed)).toBe(liveness + 3);
+
+    expect(await rows()).toEqual([
+      { action_hash_b64: "grant-1", tag: "renamed", function_count: 1, updated_at: T4 },
+      { action_hash_b64: "grant-2", tag: "by_progenitor", function_count: 3, updated_at: T4 },
+      { action_hash_b64: "grant-3", tag: "by_progenitor", function_count: 1, updated_at: T4 },
+    ]);
+    expect(await changedGrants(T4)).toBe(3);
+  });
+
+  it("rejects a post holding a grant without action_hash_b64 with a 400 that names the field, and stores nothing from it", async () => {
+    const { action_hash_b64: _, ...unhashed } = grant("");
+
+    const resp = await send(T3, env, SAME_TAG, [unhashed as CapGrantSummary]);
+
+    expect(resp.status).toBe(400);
+    expect(await resp.text()).toBe(`dna ${DNA}-1 has a cap grant without action_hash_b64`);
+    expect(await rows()).toEqual([]);
+    const observers = await env.DB.prepare("SELECT observer_id FROM observers").all();
+    expect(observers.results).toEqual([]);
+  });
+});
+
+describe("migration 0008", () => {
   beforeAll(async () => {
     await applyD1Migrations(
       env.DB,
@@ -214,81 +142,23 @@ describe("migration 0008", () => {
     await registerObserver(OBSERVER_ID, SECRET_HEX);
   });
 
-  it("carries a cap_grants row over under the key an observer without the hash posts to, so /diff counts it once", async () => {
-    await oldWorkerWrite("by_progenitor", 1, T1);
+  it("rebuilds cap_grants keyed by action hash, dropping the rows keyed by tag", async () => {
+    await env.DB.prepare(
+      `INSERT INTO cap_grants
+         (observer_id, app_id, cell_b64, tag, function_count, access_type, updated_at)
+       VALUES (?, '', '', 'by_progenitor', 1, 'Unrestricted', ?)`,
+    )
+      .bind(OBSERVER_ID, T1)
+      .run();
 
-    await applyPendingMigrations();
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
-    expect(await changedGrants(T1)).toBe(1);
+    expect(await rows()).toEqual([]);
+    const liveness = await repeatPostWrites();
+    expect(await post(T3, SAME_TAG)).toBe(liveness + 2);
     expect(await rows()).toEqual([
-      { action_hash_b64: "", tag: "by_progenitor", function_count: 1, updated_at: T1 },
+      { action_hash_b64: "grant-1", tag: "by_progenitor", function_count: 1, updated_at: T3 },
+      { action_hash_b64: "grant-2", tag: "by_progenitor", function_count: 2, updated_at: T3 },
     ]);
-
-    await post(T2, [grant("by_progenitor")]);
-    expect(await changedGrants(T2)).toBe(0);
-
-    await post(T3, [grant("by_progenitor", { function_count: 2 })]);
-    expect(await changedGrants(T3)).toBe(1);
-
-    await post(T4, []);
-    expect(await changedGrants(T1)).toBe(1);
-  });
-
-  it("drops the carried row for each tag an observer posts with its hash, so /diff counts each grant once", async () => {
-    const liveness = await repeatPostWrites(2);
-    for (const tag of ["by_progenitor", "", "unposted"]) await oldWorkerWrite(tag, 1, T1);
-    await oldWorkerWrite("by_progenitor", 1, T1, "other-observer");
-    const inSecondDna = [grant("", { tag: null, action_hash_b64: "untagged" })];
-
-    await applyPendingMigrations();
-    expect(await post(T3, SAME_TAG, inSecondDna)).toBe(liveness + 3 + 2);
-
-    expect(await keys()).toEqual([
-      { observer_id: OBSERVER_ID, action_hash_b64: "", tag: "unposted" },
-      { observer_id: OBSERVER_ID, action_hash_b64: "grant-1", tag: "by_progenitor" },
-      { observer_id: OBSERVER_ID, action_hash_b64: "grant-2", tag: "by_progenitor" },
-      { observer_id: OBSERVER_ID, action_hash_b64: "untagged", tag: "" },
-      { observer_id: "other-observer", action_hash_b64: "", tag: "by_progenitor" },
-    ]);
-    expect(await changedGrants(T1)).toBe(4);
-
-    expect(await post(T4, SAME_TAG, inSecondDna)).toBe(liveness);
-  });
-
-  it("carries a NULL tag over as '' and keeps the newest of rows that differ only in app_id or cell_b64", async () => {
-    await env.DB.batch(
-      [
-        { tag: null, app_id: "", cell_b64: "", function_count: 1, updated_at: T1 },
-        { tag: "x", app_id: "", cell_b64: "", function_count: 1, updated_at: T1 },
-        { tag: "x", app_id: "app", cell_b64: "cell", function_count: 2, updated_at: T2 },
-      ].map(({ tag, app_id, cell_b64, function_count, updated_at }) =>
-        env.DB.prepare(
-          `INSERT INTO cap_grants
-             (observer_id, app_id, cell_b64, tag, function_count, access_type, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'Unrestricted', ?)`,
-        ).bind(OBSERVER_ID, app_id, cell_b64, tag, function_count, updated_at),
-      ),
-    );
-
-    await applyPendingMigrations();
-
-    expect(await rows()).toEqual([
-      { action_hash_b64: "", tag: "", function_count: 1, updated_at: T1 },
-      { action_hash_b64: "", tag: "x", function_count: 2, updated_at: T2 },
-    ]);
-  });
-
-  it("leaves cap_grants to a Worker that predates it, and /diff catches up on the next post", async () => {
-    await oldWorkerWrite("by_progenitor", 1, T1);
-
-    await applyPendingMigrations();
-    expect(await legacyRows()).toEqual([{ tag: "by_progenitor", function_count: 1 }]);
-
-    await oldWorkerWrite("by_progenitor", 2, T2);
-    expect(await legacyRows()).toEqual([{ tag: "by_progenitor", function_count: 2 }]);
-    expect(await changedGrants(T2)).toBe(0);
-
-    await post(T3, [grant("by_progenitor", { function_count: 2 })]);
-    expect(await changedGrants(T2)).toBe(1);
   });
 });

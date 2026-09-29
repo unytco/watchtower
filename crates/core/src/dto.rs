@@ -292,8 +292,7 @@ mod tests {
         }
     }
 
-    /// The Worker keys a grant without `action_hash_b64` on its tag alone, so
-    /// renaming the field would silently merge grants that share a tag.
+    /// The Worker rejects a post whose grant lacks `action_hash_b64`.
     #[test]
     fn cap_grant_summary_posts_its_hash_as_action_hash_b64() {
         let json = serde_json::to_value(CapGrantSummary {

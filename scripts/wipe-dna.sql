@@ -5,7 +5,7 @@
 -- Alert entity keys name a DNA as `<observer>:<dna>:…` or are a warrant op hash, which several DNAs' warrants can share (worker/src/alerts.ts).
 -- instr, not LIKE: LIKE ignores case and reads `_` as a wildcard, and base64url has both.
 -- Left alone on purpose:
---   cap_grants and cap_grants_by_action: their cell_b64 is always empty.
+--   cap_grants: its cell_b64 is always empty.
 --   analysis_runs: each row is a cron snapshot across every DNA, holding op hashes only.
 --   blocks: node-scoped; a cell block names the DNA inside target_id, but the conductor keeps a
 --   cell's block spans after its app is uninstalled, so observers re-post them either way.

@@ -90,7 +90,6 @@ export async function verifyAndParse(
     return textResponse(400, "observer_id body/header mismatch");
   }
 
-  // Per-DNA size enforcement.
   for (const dna of payload.node?.dnas ?? []) {
     const bytes = new TextEncoder().encode(JSON.stringify(dna)).byteLength;
     if (bytes > MAX_DNA_BYTES) {
@@ -106,6 +105,10 @@ export async function verifyAndParse(
       dna.chain_summaries.length > MAX_ROWS_PER_TABLE
     ) {
       return textResponse(413, `too many rows for dna ${dna.dna_b64}`);
+    }
+
+    if (dna.cap_grants.some((g) => !g.action_hash_b64)) {
+      return textResponse(400, `dna ${dna.dna_b64} has a cap grant without action_hash_b64`);
     }
   }
 

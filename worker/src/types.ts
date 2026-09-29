@@ -149,8 +149,7 @@ export interface ValidationCoverageRow {
 export interface CapGrantSummary {
   app_id: string;
   cell_b64: string;
-  // Absent from an observer that predates this field.
-  action_hash_b64?: string;
+  action_hash_b64: string;
   tag?: string | null;
   function_count: number;
   access_type: string;
