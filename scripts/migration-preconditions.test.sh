@@ -7,39 +7,56 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_test.sh
 . "${SCRIPT_DIR}/_test.sh"
 
-require_cmd pnpm
 require_cmd jq
+REAL_WRANGLER="${WORKER_DIR}/node_modules/.bin/wrangler"
+if [[ ! -x "$REAL_WRANGLER" ]]; then
+  err "Missing ${REAL_WRANGLER}: run make install first."
+  exit 1
+fi
 
 GUARDED=0008_cap_grants_keyed_by_action.sql
 UNGUARDED=0007_ingest_nonces_without_rowid.sql
-PROMPT="Type 'yes' to confirm it holds and apply the pending migrations"
-FIRST_PRECONDITION="$(sed -nE '1,/precondition:/s/^-- precondition: //p' "${WORKER_DIR}/migrations/${GUARDED}")"
+PROMPT="Type 'yes' to accept them and apply the pending migrations"
+LISTED_ONLY=$'install --frozen-lockfile=false\nexec wrangler d1 migrations list watchtower --remote'
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
+
+# The scripts under test run from a copy of scripts/ and the worker's config and migrations, so a
+# case can add a migration of its own without touching the tree.
+copy="${scratch}/repo"
+migrations="${copy}/worker/migrations"
+mkdir -p "${copy}/worker"
+cp -R "$SCRIPT_DIR" "${copy}/scripts"
+cp -R "${WORKER_DIR}/migrations" "${WORKER_DIR}/wrangler.jsonc" "${copy}/worker/"
+
+# The pnpm shim logs each call, runs `d1 migrations` against the local D1 in $SHIM_PERSIST in place
+# of the remote one, answers `d1 list` with $SHIM_D1_LIST, and runs nothing else. The wrangler and
+# npx shims refuse, so a call that bypasses pnpm fails instead of reaching Cloudflare.
 shim_bin="${scratch}/bin"
 mkdir "$shim_bin"
-
-# The shim stands in for pnpm: it logs each call, points `d1 migrations` at the local D1 in
-# $SHIM_PERSIST in place of the remote one, answers `d1 list` with $SHIM_D1_LIST, and runs
-# nothing else, so nothing is ever created or deployed.
 cat >"${shim_bin}/pnpm" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$SHIM_LOG"
-if [[ "$1 $2 $3 $4" == "exec wrangler d1 list" ]]; then
-  printf '%s\n' "$SHIM_D1_LIST"
-  exit 0
-fi
-if [[ "$1 $2 $3 $4" != "exec wrangler d1 migrations" ]]; then
-  exit 0
-fi
-if [[ "$5" == list && -n "${SHIM_LIST:-}" ]]; then
-  printf '%s\n' "$SHIM_LIST"
-  exit "${SHIM_LIST_RC:-0}"
-fi
-if [[ "$5" == apply && -n "${SHIM_SKIP_APPLY:-}" ]]; then
-  exit 0
-fi
+case "$1 $2 $3 $4 $5" in
+  "exec wrangler d1 list "*)
+    printf '%s\n' "$SHIM_D1_LIST"
+    exit 0
+    ;;
+  "exec wrangler d1 migrations list")
+    if [[ -n "${SHIM_LIST:-}" ]]; then
+      printf '%s\n' "$SHIM_LIST"
+      exit "${SHIM_LIST_RC:-0}"
+    fi
+    ;;
+  "exec wrangler d1 migrations apply")
+    if [[ -n "${SHIM_SKIP_APPLY:-}" ]]; then
+      exit 0
+    fi
+    ;;
+  *) exit 0 ;;
+esac
+shift 2
 args=()
 for arg in "$@"; do
   if [[ "$arg" == --remote ]]; then
@@ -52,27 +69,37 @@ if [[ "${args[*]}" == "$*" ]]; then
   echo "shim: expected --remote in: $*" >&2
   exit 1
 fi
-exec "$REAL_PNPM" "${args[@]}"
+exec "$REAL_WRANGLER" "${args[@]}"
 EOF
-chmod +x "${shim_bin}/pnpm"
-REAL_PNPM="$(command -v pnpm)"
+cat >"${shim_bin}/wrangler" <<'EOF'
+#!/usr/bin/env bash
+echo "escaped the pnpm shim: ${0##*/} $*" | tee -a "$SHIM_LOG" >&2
+exit 1
+EOF
+cp "${shim_bin}/wrangler" "${shim_bin}/npx"
+chmod +x "${shim_bin}"/*
 DB_ID="$(sed -nE 's/.*"database_id": "([^"]+)".*/\1/p' "${WORKER_DIR}/wrangler.jsonc")"
 SHIM_D1_LIST="$(printf '[{"name":"watchtower","uuid":"%s"}]' "$DB_ID")"
-export SHIM_LOG="${scratch}/pnpm.log" SHIM_PERSIST="${scratch}/d1" SHIM_D1_LIST REAL_PNPM
+export SHIM_LOG="${scratch}/pnpm.log" SHIM_PERSIST="${scratch}/d1" SHIM_D1_LIST REAL_WRANGLER
 mkdir "$SHIM_PERSIST"
 
-d1() {
-  wrangler_in "$WORKER_DIR" d1 execute watchtower --local --persist-to "$SHIM_PERSIST" "$@"
+local_wrangler() {
+  (cd "${copy}/worker" && "$REAL_WRANGLER" "$@" --local --persist-to "$SHIM_PERSIST")
 }
 make_pending() {
   local name
   for name in "$@"; do
-    d1 --command "DELETE FROM d1_migrations WHERE name = '${name}';" >/dev/null
+    local_wrangler d1 execute watchtower --command "DELETE FROM d1_migrations WHERE name = '${name}';" >/dev/null
   done
 }
 applied() {
-  d1 --json --command "SELECT COUNT(*) AS n FROM d1_migrations WHERE name = '$1';" |
+  local_wrangler d1 execute watchtower --json --command "SELECT COUNT(*) AS n FROM d1_migrations WHERE name = '$1';" |
     jq -r '.[0].results[0].n == 1'
+}
+fixture() {
+  local name="$1"
+  shift
+  printf '%s\n' "$@" >"${migrations}/${name}"
 }
 
 run() {
@@ -80,7 +107,7 @@ run() {
   shift
   : >"$SHIM_LOG"
   rc=0
-  out="$(PATH="${shim_bin}:$PATH" bash "${SCRIPT_DIR}/${script}" "$@" 2>&1)" || rc=$?
+  out="$(PATH="${shim_bin}:$PATH" bash "${copy}/scripts/${script}" "$@" 2>&1)" || rc=$?
 }
 deploy() {
   run deploy-worker.sh "$@"
@@ -91,22 +118,42 @@ bootstrap() {
 steps() {
   sed -nE 's/^exec wrangler (d1 migrations (list|apply)|(deploy))( .*)?$/\2\3/p' "$SHIM_LOG" | paste -sd' ' -
 }
+calls() {
+  cat "$SHIM_LOG"
+}
+shows_preconditions() {
+  local what="$1" file="$2" line
+  check "${what}: names ${file}" true "$(says "  ${file}")"
+  while IFS= read -r line; do
+    check "${what}: shows '${line:0:40}...'" true "$(says "    ${line}")"
+  done < <(sed -n 's/^-- precondition: //p' "${migrations}/${file}")
+}
 
-wrangler_in "$WORKER_DIR" d1 migrations apply watchtower --local --persist-to "$SHIM_PERSIST" >/dev/null
+check "0008 declares preconditions" true "$(grep -q '^-- precondition: ' "${migrations}/${GUARDED}" && echo true || echo false)"
+check "wrangler outside the pnpm shim is refused" 1 "$(PATH="${shim_bin}:$PATH" wrangler whoami >/dev/null 2>&1 || echo $?)"
+
+local_wrangler d1 migrations apply watchtower >/dev/null
 
 make_pending "$GUARDED" "$UNGUARDED"
 deploy </dev/null
 refused "a pending precondition, no answer" "Not confirmed. Nothing applied or deployed."
 check "a pending precondition, no answer: prompts" true "$(says "$PROMPT")"
-check "a pending precondition, no answer: names the migration" true "$(says "  ${GUARDED}")"
-check "a pending precondition, no answer: shows the precondition" true "$(says "    ${FIRST_PRECONDITION}")"
+shows_preconditions "a pending precondition, no answer" "$GUARDED"
 check "a migration without a precondition is not named" false "$(says "$UNGUARDED")"
-check "a pending precondition, no answer: lists, never applies or deploys" "list" "$(steps)"
+check "a pending precondition, no answer: only installs and lists" "$LISTED_ONLY" "$(calls)"
 check "a pending precondition, no answer: nothing applied" "false false" "$(applied "$GUARDED") $(applied "$UNGUARDED")"
 
-deploy <<<"no"
-refused "a pending precondition, answered no" "Not confirmed"
-check "a pending precondition, answered no: never applies or deploys" "list" "$(steps)"
+: >"$SHIM_LOG"
+rc=0
+out="$(PATH="${shim_bin}:$PATH" bash "${copy}/scripts/deploy-worker.sh" 2>&1 >/dev/null </dev/null)" || rc=$?
+check "stdout sent elsewhere: still prompts" true "$(says "$PROMPT")"
+shows_preconditions "stdout sent elsewhere" "$GUARDED"
+
+for answer in no y YES; do
+  deploy <<<"$answer"
+  refused "a pending precondition, answered ${answer}" "Not confirmed"
+  check "a pending precondition, answered ${answer}: only installs and lists" "$LISTED_ONLY" "$(calls)"
+done
 
 deploy <<<"yes"
 check "a pending precondition, answered yes: exits zero" 0 "$rc"
@@ -116,10 +163,33 @@ check "a pending precondition, answered yes: both applied" "true true" "$(applie
 make_pending "$GUARDED"
 deploy --yes </dev/null
 check "--yes: exits zero" 0 "$rc"
-check "--yes: still shows the precondition" true "$(says "    ${FIRST_PRECONDITION}")"
+shows_preconditions "--yes" "$GUARDED"
+check "--yes: says so" true "$(says "Accepted by --yes.")"
 check "--yes: does not prompt" false "$(says "$PROMPT")"
 check "--yes: applies, then deploys" "list apply list deploy" "$(steps)"
 check "--yes: applied" true "$(applied "$GUARDED")"
+
+SECOND=0100_fixture_guarded.sql
+fixture "$SECOND" "-- precondition: The first fixture condition holds." "-- precondition: The second fixture condition holds." \
+  "CREATE TABLE IF NOT EXISTS fixture_guarded (x INTEGER);"
+make_pending "$GUARDED"
+deploy </dev/null
+refused "two pending preconditions, no answer" "Not confirmed"
+shows_preconditions "two pending preconditions" "$GUARDED"
+shows_preconditions "two pending preconditions" "$SECOND"
+check "two pending preconditions, no answer: only installs and lists" "$LISTED_ONLY" "$(calls)"
+deploy --yes </dev/null
+check "two pending preconditions, --yes: both applied" "0 true true" "$rc $(applied "$GUARDED") $(applied "$SECOND")"
+rm "${migrations}/${SECOND}"
+
+UNREAD=0101_fixture_unread.sql
+fixture "$UNREAD" "-- Precondition: Written with a capital P." "CREATE TABLE IF NOT EXISTS fixture_unread (x INTEGER);"
+deploy --yes </dev/null
+refused "a precondition in another form" "${UNREAD} mentions a precondition in a form this cannot read"
+check "a precondition in another form: shows the line" true "$(says "-- Precondition: Written with a capital P.")"
+check "a precondition in another form: only installs and lists" "$LISTED_ONLY" "$(calls)"
+check "a precondition in another form: not applied" false "$(applied "$UNREAD")"
+rm "${migrations}/${UNREAD}"
 
 make_pending "$UNGUARDED"
 deploy </dev/null
@@ -130,26 +200,8 @@ check "pending without a precondition: applied" true "$(applied "$UNGUARDED")"
 
 deploy </dev/null
 check "nothing pending: exits zero" 0 "$rc"
-check "nothing pending: shows no precondition" false "$(says "precondition. Apply")"
+check "nothing pending: shows no precondition" false "$(says "declare preconditions")"
 check "nothing pending: applies, then deploys" "list apply list deploy" "$(steps)"
-
-deploy --force </dev/null
-refused "an unknown argument" "Unknown argument: --force"
-check "an unknown argument: runs nothing" "" "$(cat "$SHIM_LOG")"
-
-SHIM_LIST="✘ [ERROR] Authentication error" SHIM_LIST_RC=1 deploy --yes </dev/null
-refused "a failed list" "Listing the migrations pending on the remote D1 failed"
-check "a failed list: never applies or deploys" "list" "$(steps)"
-
-SHIM_LIST="Some future wrangler output" deploy --yes </dev/null
-refused "a list wrangler words differently" "Could not read which migrations are pending"
-check "a list wrangler words differently: never applies or deploys" "list" "$(steps)"
-
-SHIM_LIST="Migrations to be applied:"$'\n'"| 0008-renamed.sql |" deploy --yes </dev/null
-refused "a pending list naming no migration file" "Could not read which migrations are pending"
-
-SHIM_LIST="✅ No migrations to apply!"$'\n'"│ ${GUARDED} │" deploy --yes </dev/null
-refused "a list both empty and naming a file" "Could not read which migrations are pending"
 
 make_pending "$UNGUARDED"
 SHIM_SKIP_APPLY=1 deploy </dev/null
@@ -158,17 +210,51 @@ check "an apply that leaves a migration pending: never deploys" "list apply list
 deploy </dev/null
 check "the next deploy applies it" "0 true" "$rc $(applied "$UNGUARDED")"
 
+deploy --force </dev/null
+refused "an unknown argument" "Unknown argument: --force"
+check "an unknown argument: runs nothing" "" "$(calls)"
+
+SHIM_LIST="✘ [ERROR] Authentication error" SHIM_LIST_RC=1 deploy --yes </dev/null
+refused "a failed list" "Listing the migrations pending on the remote D1 failed"
+check "a failed list: only installs and lists" "$LISTED_ONLY" "$(calls)"
+
+table() {
+  printf '%s\n' "Migrations to be applied:" "┌──────┐"
+  printf '│ %s │\n' "$@"
+  printf '%s\n' "└──────┘"
+}
+unreadable_list() {
+  local what="$1"
+  refused "$what" "Could not read which migrations are pending"
+  check "${what}: only installs and lists" "$LISTED_ONLY" "$(calls)"
+}
+SHIM_LIST="Some future wrangler output" deploy --yes </dev/null
+unreadable_list "a list wrangler words differently"
+SHIM_LIST="$(table Name 0008-renamed.sql)" deploy --yes </dev/null
+unreadable_list "a row naming no migration file"
+SHIM_LIST="$(table Name "$UNGUARDED" "0008_cap_grants_keyed_by_act…")" deploy --yes </dev/null
+unreadable_list "a truncated row beside a readable one"
+SHIM_LIST="$(table "$UNGUARDED")" deploy --yes </dev/null
+unreadable_list "a table without its Name header"
+SHIM_LIST="$(table Name)" deploy --yes </dev/null
+unreadable_list "a table with no rows"
+SHIM_LIST="✅ No migrations to apply!"$'\n'"│ Name │"$'\n'"│ ${GUARDED} │" deploy --yes </dev/null
+unreadable_list "a list both empty and naming a file"
+SHIM_LIST="$(table Name "$GUARDED")" deploy </dev/null
+refused "a readable hand-written table" "Not confirmed"
+
 make_pending "$GUARDED"
 bootstrap </dev/null
 refused "bootstrap-d1, a pending precondition, no answer" "Not confirmed. Nothing applied or deployed."
-check "bootstrap-d1, a pending precondition, no answer: shows the precondition" true "$(says "    ${FIRST_PRECONDITION}")"
-check "bootstrap-d1, a pending precondition, no answer: never applies" "list" "$(steps)"
+shows_preconditions "bootstrap-d1, no answer" "$GUARDED"
+check "bootstrap-d1, a pending precondition, no answer: only finds the D1 and lists" \
+  $'exec wrangler d1 list --json\nexec wrangler d1 migrations list watchtower --remote' "$(calls)"
 check "bootstrap-d1, a pending precondition, no answer: nothing applied" false "$(applied "$GUARDED")"
 bootstrap --yes </dev/null
 check "bootstrap-d1 --yes: exits zero" 0 "$rc"
 check "bootstrap-d1 --yes: applies, never deploys" "list apply" "$(steps)"
 check "bootstrap-d1 --yes: applied" true "$(applied "$GUARDED")"
-check "bootstrap-d1 leaves wrangler.jsonc as it was" "" "$(git -C "$REPO_ROOT" status --porcelain -- worker/wrangler.jsonc)"
+check "bootstrap-d1 leaves wrangler.jsonc as it was" true "$(cmp -s "${WORKER_DIR}/wrangler.jsonc" "${copy}/worker/wrangler.jsonc" && echo true || echo false)"
 bootstrap </dev/null
 check "bootstrap-d1, nothing pending: exits zero" 0 "$rc"
 check "bootstrap-d1, nothing pending: does not prompt" false "$(says "$PROMPT")"
@@ -176,19 +262,19 @@ bootstrap --force </dev/null
 refused "bootstrap-d1, an unknown argument" "Unknown argument: --force"
 
 make_n bootstrap-d1 YES=1
-check "make bootstrap-d1 YES=1 passes --yes" "0 --yes" "$rc $out"
+check "make bootstrap-d1 YES=1 passes --yes" "0 bootstrap-d1.sh --yes" "$rc $out"
 make_n bootstrap YES=1
-check "make bootstrap YES=1 passes --yes to bootstrap-d1" "0 --yes" "$rc $(head -1 <<<"$out")"
+check "make bootstrap YES=1 passes --yes to bootstrap-d1" "0 bootstrap-d1.sh --yes" "$rc $(head -1 <<<"$out")"
 make_n bootstrap-d1
-check "make bootstrap-d1 prompts" "0 " "$rc $out"
+check "make bootstrap-d1 prompts" "0 bootstrap-d1.sh" "$rc $out"
 make_n deploy-worker YES=1
-check "make deploy-worker YES=1 passes --yes" "0 --yes" "$rc $out"
+check "make deploy-worker YES=1 passes --yes" "0 deploy-worker.sh --yes" "$rc $out"
 make_n deploy-worker YES=0
-check "make deploy-worker YES=0 prompts" "0 " "$rc $out"
+check "make deploy-worker YES=0 prompts" "0 deploy-worker.sh" "$rc $out"
 make_n deploy-worker
-check "make deploy-worker prompts" "0 " "$rc $out"
+check "make deploy-worker prompts" "0 deploy-worker.sh" "$rc $out"
 make_n deploy YES=1
-check "make deploy YES=1 passes --yes to deploy-worker" "0 --yes" "$rc $(head -1 <<<"$out")"
+check "make deploy YES=1 passes --yes to deploy-worker" "0 deploy-worker.sh --yes" "$rc $(head -1 <<<"$out")"
 make_n deploy-worker YES=true
 check "make deploy-worker YES=true is refused" "2 true" "$rc $(says "YES takes 0 or 1")"
 rc=0

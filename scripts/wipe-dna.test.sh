@@ -182,9 +182,9 @@ refused "a failed recount" "recounting failed"
 check "a failed recount: the delete ran" true "$(logged --file)"
 
 make_n wipe-dna DNA=x YES=1 LOCAL=1
-check "make YES=1 LOCAL=1 passes --local --yes" "0 --local --yes \"\$DNA\"" "$rc $out"
+check "make YES=1 LOCAL=1 passes --local --yes" "0 wipe-dna.sh --local --yes \"\$DNA\"" "$rc $out"
 make_n wipe-dna DNA=x YES=0 LOCAL=0
-check "make YES=0 LOCAL=0 targets remote and prompts" "0 \"\$DNA\"" "$rc $out"
+check "make YES=0 LOCAL=0 targets remote and prompts" "0 wipe-dna.sh \"\$DNA\"" "$rc $out"
 make_n wipe-dna DNA=x LOCAL=true
 check "make LOCAL=true is refused" "2 true" "$rc $(says "LOCAL takes 0 or 1")"
 make_n wipe-dna DNA=x YES=true

@@ -72,9 +72,9 @@ make deploy       # deploy Worker + dashboard
 make secrets      # optional: set RESEND_API_KEY + ALERT_FROM_ADDRESS for email alerts
 ```
 
-Each target is idempotent: once D1 and the Pages project exist, rerunning
-`make bootstrap` only applies pending migrations, and `make deploy` is what
-you run every time you want to push an update.
+Each target is idempotent. Once D1 and the Pages project exist, a rerun of
+`make bootstrap` only applies pending migrations. Run `make deploy` each time
+you want to push an update.
 
 ### Sanity check
 
@@ -100,14 +100,14 @@ make deploy-dashboard
 ```
 
 `make deploy-worker` applies the pending D1 migrations, then deploys the
-Worker. A migration can declare a precondition in `-- precondition:` lines at
-its top. When a pending one does, the deploy prints it and stops until you
-type `yes`, or `YES=1` confirms it for a scripted run.
+Worker. A migration can declare preconditions in `-- precondition:` lines.
+If a pending migration has them, the deploy prints them and stops until you
+type `yes`. For a scripted run, `YES=1` gives that answer.
 
-Migration 0008 declares one. Upgrade every observer first
-(`make <server>-watchtower` in `automation/`), then `make deploy-worker`.
-A post that lands between the migration and the Worker deploy can fail, and
-each observer re-posts all its grants on its next collection cycle. There is
+Migration 0008 has preconditions. First upgrade every observer
+(`make <server>-watchtower` in `automation/`). Then run `make deploy-worker`.
+A post that arrives between the migration and the Worker deploy can fail.
+Each observer re-posts all its grants on its next collection cycle. There is
 no rollback past 0008.
 
 `make status` shows the last few Worker and Pages deployments so you can
@@ -154,8 +154,8 @@ appear in the header switcher within one collection interval (60s by default).
 | DNS record            | Yes (once)   | Cloudflare dashboard click; could be scripted via API    |
 | Pages custom domain   | Yes (once)   | Dashboard click or `CLOUDFLARE_API_TOKEN` + rerun        |
 | `make install`        | No           |                                                          |
-| `make bootstrap`      | If needed    | Idempotent; stops for `yes` as `make deploy` does        |
-| `make deploy`         | If needed    | Stops for `yes` when a pending migration has a precondition |
+| `make bootstrap`      | If needed    | Stops for `yes` on a pending precondition                |
+| `make deploy`         | If needed    | Stops for `yes` on a pending precondition                |
 | `make secrets`        | Yes (once)   | Reads values silently so they don't land in shell history |
 
 ## Troubleshooting
@@ -173,9 +173,8 @@ appear in the header switcher within one collection interval (60s by default).
 
 ### D1 migrations
 
-`make deploy` applies any pending migrations before pushing Worker code,
-once you have confirmed any precondition they declare. `make bootstrap-d1`
-applies them without deploying code, and stops for the same confirmation.
+`make bootstrap-d1` applies pending migrations without deploying code. It
+stops for preconditions as `make deploy` does.
 
 To see what is pending without applying it:
 

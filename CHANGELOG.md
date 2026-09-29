@@ -9,7 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `make deploy-worker` shows the precondition a pending D1 migration declares and waits for `yes` before applying it.
 - per-DNA migration counters: the observer derives `chain_closed` / `opening_summary_present` per reported agent, and each DNA view shows "agents closed" / "agents opened" tiles plus the flags in the per-agent rows.
 - Surface Holochain 0.7 warrant `reason` and fork `seq` on the dashboard.
 

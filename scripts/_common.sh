@@ -55,7 +55,7 @@ take_yes_flag() {
     case "$1" in
       --yes) assume_yes=true ;;
       *)
-        err "Unknown argument: $1. The only option is --yes, which confirms a pending migration's precondition."
+        err "Unknown argument: $1. The only option is --yes, which accepts a pending migration's preconditions."
         exit 1
         ;;
     esac
@@ -63,23 +63,31 @@ take_yes_flag() {
   done
 }
 
-# Sets `pending` to the files `d1 migrations apply watchtower --remote` would apply, as wrangler's
-# own list names them. The list is a table with no JSON form, so output it does not recognise stops the script.
+# Sets `pending` to the files `d1 migrations apply watchtower --remote` would apply, read from the
+# table wrangler's own list prints. The list has no JSON form, so a table this does not recognise,
+# or a row naming no file, stops the run instead of passing for an empty list.
 list_pending_migrations() {
-  local listing file
+  local listing rows name
   pending=()
-  if ! listing="$(wrangler_in "$WORKER_DIR" d1 migrations list watchtower --remote)"; then
+  if ! listing="$(WRANGLER_LOG=log wrangler_in "$WORKER_DIR" d1 migrations list watchtower --remote)"; then
     err "Listing the migrations pending on the remote D1 failed, so this run stops here."
     exit 1
   fi
-  for file in "$WORKER_DIR"/migrations/*.sql; do
-    if [[ "$listing" == *" ${file##*/} "* ]]; then
-      pending+=("$file")
-    fi
-  done
-  if [[ ${#pending[@]} -gt 0 && "$listing" == *"Migrations to be applied:"* ]] ||
-    [[ ${#pending[@]} -eq 0 && "$listing" == *"No migrations to apply!"* ]]; then
+  rows="$(sed -nE 's/^│ (.*[^ ]) +│$/\1/p' <<<"$listing")"
+  if [[ -z "$rows" && "$listing" == *"No migrations to apply!"* ]]; then
     return 0
+  fi
+  if [[ "$listing" == *"Migrations to be applied:"* && "$rows" == Name$'\n'* ]]; then
+    while IFS= read -r name; do
+      if [[ ! -f "${WORKER_DIR}/migrations/${name}" || ! -r "${WORKER_DIR}/migrations/${name}" ]]; then
+        pending=()
+        break
+      fi
+      pending+=("${WORKER_DIR}/migrations/${name}")
+    done <<<"${rows#Name$'\n'}"
+    if ((${#pending[@]})); then
+      return 0
+    fi
   fi
   err "Could not read which migrations are pending on the remote D1, so this run stops here. Wrangler said:"
   echo "$listing" >&2
@@ -87,22 +95,27 @@ list_pending_migrations() {
 }
 
 confirm_pending_preconditions() {
-  local assume_yes="$1" file lines shown=""
+  local assume_yes="$1" file unread shown=""
   list_pending_migrations
   for file in ${pending[@]+"${pending[@]}"}; do
-    lines="$(sed -nE 's/^--[[:space:]]*precondition:[[:space:]]*/    /p' "$file")"
-    if [[ -n "$lines" ]]; then
-      shown+="  ${file##*/}"$'\n'"${lines}"$'\n'
+    unread="$(grep -i precondition "$file" | grep -v '^-- precondition: ' || true)"
+    if [[ -n "$unread" ]]; then
+      err "${file##*/} mentions a precondition in a form this cannot read, so this run stops here. Write each as '-- precondition: <text>':"
+      echo "$unread" >&2
+      exit 1
+    fi
+    if grep -q '^-- precondition: ' "$file"; then
+      shown+="  ${file##*/}"$'\n'"$(sed -n 's/^-- precondition: /    /p' "$file")"$'\n'
     fi
   done
   if [[ -z "$shown" ]]; then
     return 0
   fi
-  warn "Pending migrations declare a precondition. Apply them only once it holds:"
-  printf '%s' "$shown"
-  if $assume_yes; then
-    log "Confirmed by --yes."
+  warn "Pending migrations declare preconditions:" >&2
+  printf '%s' "$shown" >&2
+  if [[ "$assume_yes" == true ]]; then
+    log "Accepted by --yes." >&2
     return 0
   fi
-  ask_yes "Type 'yes' to confirm it holds and apply the pending migrations" "Nothing applied or deployed."
+  ask_yes "Type 'yes' to accept them and apply the pending migrations" "Nothing applied or deployed."
 }

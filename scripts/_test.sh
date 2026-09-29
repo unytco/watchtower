@@ -1,6 +1,9 @@
 # shellcheck shell=bash
 # Shared checks for the operator-script tests. Source after _common.sh.
 
+# A wrangler call that escapes a test's pnpm shim authenticates with this and fails.
+export CLOUDFLARE_API_TOKEN=operator-script-tests-hold-no-token
+
 failures=0
 check() {
   local what="$1" expected="$2" actual="$3"
@@ -29,7 +32,7 @@ logged() {
 make_n() {
   rc=0
   out="$(make -s -n -C "$REPO_ROOT" "$@" 2>&1)" || rc=$?
-  out="$(tr -s ' ' <<<"$out" | sed -E 's/.*\.sh ?//')"
+  out="$(tr -s ' ' <<<"$out" | sed -E 's|.*/scripts/||; s/ $//')"
 }
 
 finish() {
