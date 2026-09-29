@@ -39,13 +39,15 @@ bootstrap-pages: ## One-time: create Pages project `unyt-watchtower-dashboard` +
 
 bootstrap: bootstrap-d1 bootstrap-pages ## One-time: D1 + Pages setup
 
-deploy-worker: ## Apply D1 migrations and deploy the Worker; YES=1 confirms a pending migration's precondition
+deploy-worker: ## Apply D1 migrations and deploy the Worker; YES=1 accepts a pending migration's preconditions
 	bash $(SCRIPTS)/deploy-worker.sh $(yes_flag)
 
 deploy-dashboard: ## Build + deploy the Pages dashboard
 	bash $(SCRIPTS)/deploy-dashboard.sh
 
-deploy: deploy-worker deploy-dashboard ## Deploy both Worker and dashboard; YES=1 as for deploy-worker
+# The dashboard deploys only once the Worker has, even under -j or -k.
+deploy: deploy-worker ## Deploy both Worker and dashboard; YES=1 as for deploy-worker
+	$(MAKE) --no-print-directory deploy-dashboard
 
 secrets: ## Interactively set Worker secrets (RESEND_API_KEY, ALERT_FROM_ADDRESS)
 	bash $(SCRIPTS)/secrets.sh

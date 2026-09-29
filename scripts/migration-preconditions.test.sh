@@ -261,6 +261,21 @@ check "bootstrap-d1, nothing pending: does not prompt" false "$(says "$PROMPT")"
 bootstrap --force </dev/null
 refused "bootstrap-d1, an unknown argument" "Unknown argument: --force"
 
+cp "${REPO_ROOT}/Makefile" "${copy}/"
+echo 'echo deploy-dashboard >>"$SHIM_LOG"' >"${copy}/scripts/deploy-dashboard.sh"
+make_deploy() {
+  : >"$SHIM_LOG"
+  rc=0
+  out="$(PATH="${shim_bin}:$PATH" make -s -C "$copy" "$@" 2>&1 </dev/null)" || rc=$?
+}
+make_pending "$GUARDED"
+for flag in -k -j2; do
+  make_deploy "$flag" deploy
+  check "make ${flag} deploy after a refusal: fails and never deploys the dashboard" "2 false" "$rc $(logged deploy-dashboard)"
+done
+make_deploy deploy YES=1
+check "make deploy YES=1: the dashboard deploys after the Worker" "0 exec wrangler deploy|deploy-dashboard" "$rc $(tail -2 "$SHIM_LOG" | paste -sd'|' -)"
+
 make_n bootstrap-d1 YES=1
 check "make bootstrap-d1 YES=1 passes --yes" "0 bootstrap-d1.sh --yes" "$rc $out"
 make_n bootstrap YES=1
