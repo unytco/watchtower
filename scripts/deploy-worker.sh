@@ -22,7 +22,7 @@ log "Installing worker dependencies..."
 
 log "Checking the pending D1 migrations for preconditions..."
 confirm_pending_preconditions "$assume_yes"
-apply_pending_migrations "The Worker was not deployed. Run make deploy-worker again."
+apply_pending_migrations "The Worker was not deployed. Run the same make target again."
 
 log "Deploying Worker..."
 wrangler_in "$WORKER_DIR" deploy

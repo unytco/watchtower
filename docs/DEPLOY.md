@@ -107,9 +107,9 @@ run, pass `YES=1` on the make command line.
 
 Migration 0008 has preconditions. First upgrade every observer
 (`make <server>-watchtower` in `automation/`). Then run `make deploy-worker`.
-A post that arrives between the migration and the Worker deploy can fail.
-Each observer re-posts all its grants on its next collection cycle. There is
-no rollback past 0008.
+Between the migration and the Worker deploy, every post that reports a
+capability grant fails. Each observer re-posts all its grants on its next
+collection cycle. There is no rollback past 0008.
 
 `make status` shows the last few Worker and Pages deployments so you can
 confirm what's currently live.
@@ -164,7 +164,8 @@ appear in the header switcher within one collection interval (60s by default).
 | Symptom                                             | Fix                                                                   |
 | --------------------------------------------------- | ------------------------------------------------------------------- |
 | `bootstrap-d1.sh`: "D1 'watchtower' already exists" | Expected. Script skips create, still applies migrations.            |
-| "Migrations are still pending after the apply"      | Wrangler's own `continue?` got a no, or a statement failed. Run the same target again. |
+| "Applying the migrations failed"                    | Fix the error wrangler printed above it, then run the same target again. |
+| "Migrations are still pending after the apply"      | Wrangler's own `continue?` got a no. Run the same target again.     |
 | `wrangler.jsonc` still has `REPLACE_ME_LOCAL_DEV`   | Run `make bootstrap-d1` (it patches the file via `sed`).            |
 | "Route conflict" on deploy                          | Another Worker in the account owns `watchtower.unyt.dev`. Remove it. |
 | `curl /healthz` returns 522 / SSL error             | DNS record missing or Pages/Worker cert still provisioning. Wait.    |
@@ -197,4 +198,4 @@ pnpm exec wrangler d1 migrations list watchtower --remote
 - Pages: go to the Cloudflare dashboard -> Pages -> `unyt-watchtower-dashboard`
   -> Deployments, click "Rollback" on any previous deployment.
 - D1 schema: there is no automatic down-migration; add a new migration file
-  under `worker/migrations/` and run `make bootstrap-d1` to apply it.
+  under `worker/migrations/` and run `make deploy-worker` to apply it.

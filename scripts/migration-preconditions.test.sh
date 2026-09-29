@@ -45,7 +45,7 @@ case "$1 $2 $3 $4 $5" in
     ;;
   "exec wrangler d1 migrations list")
     if [[ "$(grep -c ' d1 migrations list ' "$SHIM_LOG")" == "${SHIM_FAIL_LIST_CALL:-}" ]]; then
-      echo "✘ [ERROR] Authentication error" >&2
+      echo "✘ [ERROR] In a non-interactive environment, it's necessary to set a CLOUDFLARE_API_TOKEN environment variable for wrangler to work." >&2
       exit 1
     fi
     if [[ -n "${SHIM_LIST:-}" ]]; then
@@ -228,7 +228,7 @@ SHIM_SKIP_APPLY=1 deploy </dev/null
 refused "an apply that leaves a migration pending" "still pending after the apply: ${UNGUARDED}. The Worker was not deployed."
 check "an apply that leaves a migration pending: never deploys" "list apply list" "$(steps)"
 SHIM_FAIL_APPLY=1 deploy </dev/null
-refused "a failed apply" "Applying the migrations failed. The Worker was not deployed."
+refused "a failed apply" "Applying the migrations failed. Wrangler's error above names the cause. The Worker was not deployed."
 check "a failed apply: never deploys" "list apply" "$(steps)"
 SHIM_FAIL_LIST_CALL=2 deploy </dev/null
 refused "a failed list after the apply" "Listing the migrations pending on the remote D1 failed. The Worker was not deployed."

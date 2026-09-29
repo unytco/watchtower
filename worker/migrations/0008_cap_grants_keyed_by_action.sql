@@ -3,7 +3,7 @@
 -- hash to rekey them by, so the table is dropped.
 --
 -- precondition: Every observer already runs a build that posts action_hash_b64 with each grant: `make <server>-watchtower` in automation/.
--- precondition: Stored grants are dropped. A post that lands between this migration and the Worker deploy can fail, and each observer re-posts all its grants on its next collection cycle.
+-- precondition: Stored grants are dropped. Between this migration and the Worker deploy, every post that reports a capability grant fails, and each observer re-posts all its grants on its next collection cycle.
 -- precondition: There is no rollback past this migration: an older Worker fails every post that reports a capability grant.
 
 DROP TABLE cap_grants;

@@ -56,6 +56,6 @@ fi
 
 log "Checking the pending D1 migrations for preconditions..."
 confirm_pending_preconditions "$assume_yes"
-apply_pending_migrations "The D1 bootstrap is not complete. Run make bootstrap-d1 again."
+apply_pending_migrations "The D1 bootstrap is not complete. Run the same make target again."
 
 log "D1 bootstrap complete."

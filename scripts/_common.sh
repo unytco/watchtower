@@ -71,7 +71,7 @@ list_pending_migrations() {
   local stopped="$1" listing rows name
   pending=()
   if ! listing="$(WRANGLER_LOG=log wrangler_in "$WORKER_DIR" d1 migrations list watchtower --remote)"; then
-    err "Listing the migrations pending on the remote D1 failed. ${stopped} If wrangler says you are not logged in, run make login."
+    err "Listing the migrations pending on the remote D1 failed. ${stopped} If wrangler asks for CLOUDFLARE_API_TOKEN, this machine is not logged in: run make login, then the same make target again."
     echo "$listing" >&2
     exit 1
   fi
@@ -128,7 +128,7 @@ apply_pending_migrations() {
   local stopped="$1"
   log "Applying D1 migrations (remote)..."
   if ! wrangler_in "$WORKER_DIR" d1 migrations apply watchtower --remote; then
-    err "Applying the migrations failed. ${stopped}"
+    err "Applying the migrations failed. Wrangler's error above names the cause. ${stopped}"
     exit 1
   fi
   list_pending_migrations "$stopped"
