@@ -79,7 +79,7 @@ you want to push an update.
 ### Sanity check
 
 ```bash
-curl https://watchtower.unyt. dev/healthz
+curl https://watchtower.unyt.dev/healthz
 # -> ok
 
 curl https://watchtower.unyt.dev/api/observers
@@ -101,8 +101,9 @@ make deploy-dashboard
 
 `make deploy-worker` applies the pending D1 migrations, then deploys the
 Worker. A migration can declare preconditions in `-- precondition:` lines.
-If a pending migration has them, the deploy prints them and stops until you
-type `yes`. For a scripted run, `YES=1` gives that answer.
+If a pending migration has them, the deploy prints them and asks you to type
+`yes`. Any other answer stops it before anything is applied. For a scripted
+run, pass `YES=1` on the make command line.
 
 Migration 0008 has preconditions. First upgrade every observer
 (`make <server>-watchtower` in `automation/`). Then run `make deploy-worker`.
@@ -163,6 +164,7 @@ appear in the header switcher within one collection interval (60s by default).
 | Symptom                                             | Fix                                                                   |
 | --------------------------------------------------- | ------------------------------------------------------------------- |
 | `bootstrap-d1.sh`: "D1 'watchtower' already exists" | Expected. Script skips create, still applies migrations.            |
+| "Migrations are still pending after the apply"      | Wrangler's own `continue?` got a no, or a statement failed. Run the same target again. |
 | `wrangler.jsonc` still has `REPLACE_ME_LOCAL_DEV`   | Run `make bootstrap-d1` (it patches the file via `sed`).            |
 | "Route conflict" on deploy                          | Another Worker in the account owns `watchtower.unyt.dev`. Remove it. |
 | `curl /healthz` returns 522 / SSL error             | DNS record missing or Pages/Worker cert still provisioning. Wait.    |
@@ -190,7 +192,8 @@ pnpm exec wrangler d1 migrations list watchtower --remote
 ## Rollback
 
 - Worker: `cd worker && pnpm exec wrangler rollback`. Once migration 0008
-  is applied, an older Worker cannot store capability grants, so roll forward.
+  is applied, an older Worker fails every post that reports a capability
+  grant, so roll forward.
 - Pages: go to the Cloudflare dashboard -> Pages -> `unyt-watchtower-dashboard`
   -> Deployments, click "Rollback" on any previous deployment.
 - D1 schema: there is no automatic down-migration; add a new migration file

@@ -44,7 +44,7 @@ else
 fi
 
 log "Patching worker/wrangler.jsonc with database_id..."
-# sed, not jq: jq would reformat the file and drop its comments.
+# sed, not jq: jq would reformat the file and cannot parse the comments JSONC allows.
 if grep -q '"database_id": "REPLACE_ME_LOCAL_DEV"' "$WRANGLER_JSONC"; then
   sed -i "s|\"database_id\": \"REPLACE_ME_LOCAL_DEV\"|\"database_id\": \"$DB_ID\"|" "$WRANGLER_JSONC"
   log "database_id written."
