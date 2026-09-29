@@ -182,6 +182,11 @@ WRANGLER_LOG=error deploy --yes </dev/null
 check "WRANGLER_LOG=error in the environment: still reads the list" "0 true" "$rc $(applied "$GUARDED")"
 shows_preconditions "WRANGLER_LOG=error in the environment" "$GUARDED"
 
+make_pending "$GUARDED"
+FORCE_COLOR=1 deploy --yes </dev/null
+check "FORCE_COLOR=1 in the environment: still reads the list" "0 true" "$rc $(applied "$GUARDED")"
+shows_preconditions "FORCE_COLOR=1 in the environment" "$GUARDED"
+
 SECOND=0100_fixture_guarded.sql
 fixture "$SECOND" "-- precondition: The first fixture condition holds." "-- precondition: The second fixture condition holds." \
   "CREATE TABLE IF NOT EXISTS fixture_guarded (x INTEGER);"

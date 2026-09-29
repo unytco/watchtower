@@ -75,7 +75,7 @@ list_pending_migrations() {
     echo "$listing" >&2
     exit 1
   fi
-  rows="$(sed -nE 's/^│ (.*[^ ]) +│$/\1/p' <<<"$listing")"
+  rows="$(sed -nE -e $'s/\033\\[[0-9;]*m//g' -e 's/^│ (.*[^ ]) +│$/\1/p' <<<"$listing")"
   if [[ -z "$rows" && "$listing" == *"No migrations to apply!"* ]]; then
     return 0
   fi
