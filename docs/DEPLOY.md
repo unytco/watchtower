@@ -72,14 +72,14 @@ make deploy       # deploy Worker + dashboard
 make secrets      # optional: set RESEND_API_KEY + ALERT_FROM_ADDRESS for email alerts
 ```
 
-Each target is idempotent: rerunning `make bootstrap` is a no-op once D1 and
-the Pages project exist, and `make deploy` is what you run every time you
-want to push an update.
+Each target is idempotent. Once D1 and the Pages project exist, a rerun of
+`make bootstrap` only applies pending migrations. Run `make deploy` each time
+you want to push an update.
 
 ### Sanity check
 
 ```bash
-curl https://watchtower.unyt. dev/healthz
+curl https://watchtower.unyt.dev/healthz
 # -> ok
 
 curl https://watchtower.unyt.dev/api/observers
@@ -98,6 +98,18 @@ make deploy                # worker + dashboard
 make deploy-worker
 make deploy-dashboard
 ```
+
+`make deploy-worker` applies the pending D1 migrations, then deploys the
+Worker. A migration can declare preconditions in `-- precondition:` lines.
+If a pending migration has them, the deploy prints them and asks you to type
+`yes`. Any other answer stops it before anything is applied. For a scripted
+run, pass `YES=1` on the make command line.
+
+Migration 0008 has preconditions. First upgrade every observer
+(`make <server>-watchtower` in `automation/`). Then run `make deploy-worker`.
+Between the migration and the Worker deploy, every post that reports a
+capability grant fails. Each observer re-posts all its grants on its next
+collection cycle. There is no rollback past 0008.
 
 `make status` shows the last few Worker and Pages deployments so you can
 confirm what's currently live.
@@ -143,8 +155,8 @@ appear in the header switcher within one collection interval (60s by default).
 | DNS record            | Yes (once)   | Cloudflare dashboard click; could be scripted via API    |
 | Pages custom domain   | Yes (once)   | Dashboard click or `CLOUDFLARE_API_TOKEN` + rerun        |
 | `make install`        | No           |                                                          |
-| `make bootstrap`      | No           | `bootstrap-d1.sh` / `bootstrap-pages.sh` are idempotent  |
-| `make deploy`         | No           |                                                          |
+| `make bootstrap`      | If needed    | Stops for `yes` on a pending precondition                |
+| `make deploy`         | If needed    | Stops for `yes` on a pending precondition                |
 | `make secrets`        | Yes (once)   | Reads values silently so they don't land in shell history |
 
 ## Troubleshooting
@@ -152,30 +164,27 @@ appear in the header switcher within one collection interval (60s by default).
 | Symptom                                             | Fix                                                                   |
 | --------------------------------------------------- | ------------------------------------------------------------------- |
 | `bootstrap-d1.sh`: "D1 'watchtower' already exists" | Expected. Script skips create, still applies migrations.            |
+| "Applying the migrations failed"                    | Fix the error wrangler printed above it, then run the same target again. |
+| "Migrations are still pending after the apply"      | Wrangler's own `continue?` got a no. Run the same target again.     |
 | `wrangler.jsonc` still has `REPLACE_ME_LOCAL_DEV`   | Run `make bootstrap-d1` (it patches the file via `sed`).            |
 | "Route conflict" on deploy                          | Another Worker in the account owns `watchtower.unyt.dev`. Remove it. |
 | `curl /healthz` returns 522 / SSL error             | DNS record missing or Pages/Worker cert still provisioning. Wait.    |
 | Pages custom domain shows "pending"                 | Cloudflare ACME run. Retry after a few minutes.                     |
 | Observer logs `401 unknown observer`                | D1 `observer_secrets` row missing. Rerun the `*-watchtower` target. |
 | Observer logs `409 schema mismatch`                 | `SCHEMA_VERSION` in `worker/wrangler.jsonc` differs from observer.   |
+| Observer logs `400 … cap grant without action_hash_b64` | The observer predates the Worker. Upgrade it.                    |
 
 ### D1 migrations
 
-`make deploy` applies any pending migrations automatically before pushing
-Worker code, so in normal operation you do not need to think about schema
-sync. `deploy-worker.sh` runs the same `wrangler d1 migrations apply
-watchtower --remote` call that `bootstrap-d1.sh` uses, so bootstrap and
-deploy stay in lockstep.
+`make bootstrap-d1` applies pending migrations without deploying code. It
+stops for preconditions as `make deploy` does.
 
-If you ever need to apply migrations standalone (for example to inspect
-the remote state without deploying code):
+To see what is pending without applying it:
 
 ```bash
 cd watchtower/worker
-pnpm exec wrangler d1 migrations apply watchtower --remote
+pnpm exec wrangler d1 migrations list watchtower --remote
 ```
-
-The command is idempotent; already-applied migrations are skipped.
 
 ### Removing a retired DNA
 
@@ -183,8 +192,10 @@ The command is idempotent; already-applied migrations are skipped.
 
 ## Rollback
 
-- Worker: `cd worker && pnpm exec wrangler rollback`.
+- Worker: `cd worker && pnpm exec wrangler rollback`. Once migration 0008
+  is applied, an older Worker fails every post that reports a capability
+  grant, so roll forward.
 - Pages: go to the Cloudflare dashboard -> Pages -> `unyt-watchtower-dashboard`
   -> Deployments, click "Rollback" on any previous deployment.
 - D1 schema: there is no automatic down-migration; add a new migration file
-  under `worker/migrations/` and run `make bootstrap-d1` to apply it.
+  under `worker/migrations/` and run `make deploy-worker` to apply it.

@@ -321,13 +321,7 @@ async fn collect_from_dht(
         degraded,
     )
     .into_iter()
-    .map(|r| CapGrantSummary {
-        app_id: String::new(),
-        cell_b64: String::new(),
-        tag: r.tag,
-        function_count: r.function_count as u32,
-        access_type: r.access_type,
-    })
+    .map(cap_grant_summary)
     .collect();
 
     // Lag and the op counts are load-bearing health signals whose read can
@@ -645,6 +639,17 @@ fn decode_proof(proof: &WarrantProof) -> (String, WarrantProofSummary) {
     }
 }
 
+fn cap_grant_summary(r: extensions::CapGrantRowSummary) -> CapGrantSummary {
+    CapGrantSummary {
+        app_id: String::new(),
+        cell_b64: String::new(),
+        action_hash_b64: tag::b64url(r.action_hash.get_raw_39()),
+        tag: r.tag,
+        function_count: r.function_count as u32,
+        access_type: r.access_type,
+    }
+}
+
 fn validation_status_label(status: ValidationStatus) -> String {
     match status {
         ValidationStatus::Valid => "Valid",
@@ -742,6 +747,21 @@ mod tests {
         // One microsecond before the epoch.
         assert_eq!(ts_to_iso(-1), "1969-12-31T23:59:59.999999+00:00");
         assert_eq!(ts_to_iso(i64::MIN), "");
+    }
+
+    #[test]
+    fn cap_grant_summary_posts_the_bare_base64url_of_the_39_byte_action_hash() {
+        let summary = cap_grant_summary(extensions::CapGrantRowSummary {
+            action_hash: action(0x01),
+            tag: Some("by_progenitor".to_string()),
+            function_count: 1,
+            access_type: "Unrestricted".to_string(),
+        });
+
+        assert_eq!(
+            summary.action_hash_b64,
+            "hCkkAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        );
     }
 
     #[test]
