@@ -16,7 +16,7 @@ Workers Free plan, as published on 2026-09-28:
 | D1 string, BLOB or row | 2,000,000 bytes. | [2] |
 | D1 SQL statement text | 100,000 bytes. Bound values are not part of the text. | [2] |
 | D1 bound parameters | 100 per statement. | [2] |
-| D1 queries per Worker invocation | 50. One `batch()` is one query: production runs 320-statement batches on this account. | [2], observed |
+| D1 queries per Worker invocation | 50. One `batch()` is one query against this limit: production runs 320-statement batches on this account. | [2], observed |
 | Workers requests | 100,000 per day. Beyond that, Cloudflare answers error 1027. | [4] |
 | Workers CPU | 10 ms per HTTP request and per cron run. Cloudflare tolerates infrequent overruns only. | [4] |
 | Subrequests | 50 per invocation. | [4] |
@@ -56,7 +56,7 @@ Notation:
 - `m` is 1 for a post whose metrics differ from the stored hour, else 0.
 - `β` and `τ` are 1 for a bridge post whose backlog or throughput numbers changed, else 0.
 
-### The schema of migrations 0001 to 0007
+### The schema of migrations 0001 to 0008
 
 Rows written per day:
 
@@ -69,7 +69,7 @@ W = O·p_o·(3 + D·(1 + A + 2a + s + 2v + m)) + 96·O·D + B·p_b·(3 + β + τ
 - `96` per series and day: a new hourly bucket costs 3 writes (table and two indexes), and its deletion 1, 24 times a day.
 - Per bridge post: the nonce, its deletion, and the service row.
 
-Production check: from 20:20 to 21:05 UTC on 2026-09-28, the database wrote 260 rows, which is 8,320 a day. The formula gives 8,256 for today's fleet.
+Production check, measured on 2026-09-29 and 30: D1 wrote about 344 rows an hour, which is 8,256 a day. The formula gives the same for today's fleet.
 
 | Scenario (1 observer, 1 DNA, 1 bridge unless stated) | Rows written per day |
 | --- | --- |
@@ -94,9 +94,15 @@ Reads grow with agents too:
 - `/api/dnas` and `/api/dnas/:dna/summary` each read about 3 rows per stored agent: 306 at 100 agents.
 - The dashboard polls them every 30 s, 2,880 times a day per open tab. One tab left open reads about 8,640·A rows a day.
 - The 5,000,000 read limit falls at about 580 agents with one such tab, and at about 290 with two.
-- The cron's retention delete on `bridge_throughput_ts` scans the whole table on every run, because no index leads with the hour. That is 644 rows per run today, and 207,000 a day at 30 days of retention.
+- The cron's retention delete on `bridge_throughput_ts` scans the whole table on every run, because no index leads with the hour. That was 644 rows a run on 2026-09-28, and reaches 207,000 a day at 30 days of retention.
 
-CPU: each observer post builds about 330 statements. In production on 2026-09-28, observer posts used 17 to 46 ms of CPU, over the 10 ms limit on every post. Bridge posts used 3 to 4 ms.
+Production check, measured on 2026-09-29 and 30: D1 read about 12,200 rows an hour, 293,000 a day. The retention delete makes about two thirds of that.
+
+CPU:
+
+- Each observer post builds about 330 statements. D1's analytics count every statement in a batch as a query: they counted about 4,340 an hour on 2026-09-29 and 30, most of them from the 12 observer posts an hour.
+- On 2026-09-28, observer posts used 17 to 46 ms of CPU, over the 10 ms limit on every post. Bridge posts used 3 to 4 ms.
+- In the 24 hours to about 05:10 UTC on 2026-09-30, the Worker served 2,327 requests with no errors. CPU was 3.6 ms at the median and 36 ms at the 99th percentile. Cloudflare tolerated the observer posts' overrun.
 
 ### This design
 
@@ -170,7 +176,7 @@ A trigger aborts any update that sets `last_ts_ms` without raising it, with the 
 - `throughput_hours` holds `succeeded`, `failed` and `avg_time_to_succeed_s`. Its `observer_id` is the reporter's client id.
 - The key leads with the hour, so the retention delete reads only the rows it deletes.
 
-These tables stay as they are: `observer_secrets`, `alert_rules`, `alert_incidents`, `agent_tags`, `dna_tags`. The schema has no other table.
+These tables stay as they are, with their rows: `observer_secrets`, `alert_rules`, `alert_incidents`, `agent_tags`, `dna_tags`. The schema has no other table.
 
 ### Entries
 
@@ -185,12 +191,12 @@ An entry is the item the client posted, as received, plus the Worker's stamps. T
 | `chain_locks` | `author_b64`, `subject_b64` | | | | `updated_at` |
 | `scheduled_functions` | `author_b64`, `zome`, `fn_name` | | | | `updated_at` |
 | `validation_coverage` | `op_hash_b64` | | | | `updated_at` |
-| `cap_grants` | `app_id`, `cell_b64`, `tag` (null as "") | | | | `updated_at` |
+| `cap_grants` | `action_hash_b64`: the hash of the `Create` or `Update` action that wrote the grant | | | | `updated_at` |
 | `dna_definition` | One per report. | | | | `updated_at` |
 | `apps`, in the client `node` | `app_id` | | | | `updated_at` |
 | `blocks`, in the client `node` | `target_id`, `start_iso` | | | | `updated_at` |
 
-Content is every field the row does not name. A warrant's `proof_summary` is stored as the JSON text `proof_summary_json`, the form the API returns.
+Content is every field the row does not name. A warrant's `proof_summary` is stored as the JSON text `proof_summary_json`, the form the API returns. A grant's `tag` is content, and can be null.
 
 A post merges into the stored entries by these rules:
 
@@ -227,7 +233,10 @@ Both `/ingest` and `/ingest/bridge` handle a post in this order:
 3. The nonce header stays required, because the signature covers it. The Worker does not store it.
 4. The Worker parses and checks the body before it writes anything. Invalid JSON answers 400. So does a body `observer_id` that differs from the header.
 5. A missing section answers 400. An observer post needs `node.dnas`, `node.apps` and `node.blocks`. A bridge post needs `dna_b64`, `self_health`, `backlog` and `throughput`. Today a missing `node` fails later with 500, after the nonce is written.
-6. A DNA over 100 KiB answers 413. So does a DNA with more than 10,000 agents, warrants or chain summaries.
+6. The Worker checks each posted DNA in turn:
+   - A DNA over 100 KiB answers 413. So does a DNA with more than 10,000 agents, warrants or chain summaries.
+   - Then a `cap_grants` that is not an array answers 400. So does a grant that is not an object, or whose `action_hash_b64` is missing, empty or not a string.
+   - The text names the DNA and the fault, as in `dna <dna_b64> has a cap grant without action_hash_b64`.
 7. A client id whose stored `kind` differs from the endpoint's answers 409 `client kind mismatch`. Nothing rejects this today.
 8. The Worker reads the client row. For each posted DNA, it reads every report of that DNA: its own in full, and the other observers' `agents` and `warrants`.
 9. One batch writes the post: the client row first, then one report row per posted DNA, then any completed hours.
@@ -326,6 +335,17 @@ Each run stays within the 50-query and 50-subrequest limits, whatever the number
 
 A run with nothing expired and no rules writes nothing.
 
+### Removing a DNA
+
+`make wipe-dna DNA=<hash>` works as today on the new tables: it shows the DNA's rows per table, deletes them once the operator types the hash or `yes`, and counts again. It deletes:
+
+- The DNA's reports, with every entry in them, capability grants included.
+- Its `metric_hours` and `throughput_hours` rows, and its `dna_tags` names.
+- Bridge clients whose `dna_b64` is the DNA, with their replay guard.
+- Alert incidents whose entity key names the DNA, or is the op hash of a warrant that no other DNA's report holds.
+
+Observer clients and `agent_tags` stay, because neither is per DNA. A client still on the DNA writes its rows again on its next post.
+
 ### Budgets
 
 Each budget is testable with the vitest D1 pool, counting every statement, `first()` included:
@@ -340,7 +360,7 @@ Each budget is testable with the vitest D1 pool, counting every statement, `firs
 
 Every endpoint keeps its path, parameters and response shape. Every field keeps its meaning, except for these changes:
 
-1. **Capability grants are per DNA**. The observer reports them per DNA, and the Worker stores them in the DNA's report. Their Activity count follows the DNA filter, under DNA activity. Today the Worker stores them per observer, and grants with one tag in two DNAs share one row.
+1. **Capability grants are per DNA**. The observer reports them per DNA, and the Worker stores them in the DNA's report. Their Activity count follows the DNA filter, under DNA activity. Today the Worker stores them per observer with no DNA, so their count covers every observer's node, under Node activity.
 2. **Warrants are stored per observer and DNA**. One observer can report one op hash under two DNAs. That gives two entries. Today it is one row, keyed by observer and op hash, with the first DNA.
 3. **Unlisted entries stay until the report budget removes them**. A removed entry no longer counts anywhere: not in Activity, rollups or search.
 4. **`pending_backlog` looks at the current and the last completed hour**. A new rule does not fire for older hours still in retention.
@@ -354,7 +374,6 @@ These meanings stay exactly as they are:
 - `updated_at` moves only on a content change.
 - "DNAs seen" moves on every post.
 - An agent's last-seen is the latest post that listed it.
-- First-seen values carry over from the current tables.
 - An hourly point holds the last post of that hour.
 - Degraded reads stay null.
 
@@ -383,7 +402,7 @@ These limits come in the order the network reaches them:
 1. **The observer's own per-DNA cap, 100 KiB**. It is `MAX_DNA_SNAPSHOT_BYTES` in `crates/core/src/lib.rs` and `MAX_DNA_BYTES` in the Worker.
    - Past it, the observer halves slice hashes, then capability grants, coverage, chain summaries, agents and warrants, until the DNA fits.
    - With 229 slice hashes and 50 coverage entries, a DNA is complete up to about 160 agents. The observer drops agents themselves from between 200 and 330.
-   - This is not a Cloudflare limit. This design keeps every entry an observer ever listed. Open decision 4 covers the cap.
+   - This is not a Cloudflare limit. This design keeps every entry an observer ever listed. Open decision 3 covers the cap.
 2. **Workers CPU, 10 ms per request**. A post's CPU grows with the JSON it parses and writes: the payload, the stored reports, other observers' agents and warrants, and the new reports.
    - Merging measured about 2.5 ms per MB of that JSON, in V8 on a workstation. This spec assumes 5 ms per MB in production, on top of the 3 to 4 ms a bridge post already uses.
    - Today a post handles about 100 KB of JSON. At the 100 KiB payload cap with a full 256 KiB report, it handles about 600 KB, near 7 ms in total.
@@ -396,7 +415,7 @@ These limits come in the order the network reaches them:
 5. **D1 rows read, 5,000,000 a day**. A tab left open reads about 86,000 rows a day, so the limit falls at around 50 such tabs.
 6. **D1 storage, 500 MB**. A report holds at most 256 KiB, and an hourly series about 36 KB. 100 observer and DNA pairs need about 30 MB.
 
-### Against Workers Paid
+### Compared with Workers Paid
 
 Workers Paid costs at least $5 a month [3]. It includes:
 
@@ -406,44 +425,50 @@ Workers Paid costs at least $5 a month [3]. It includes:
 
 Compared:
 
-- **The current schema on Paid** stays inside the included writes up to about 5,800 quiet agents or 1,900 fully active ones per observer. An observer cannot report that many. Paid also removes the CPU limit that today's observer posts already exceed. It fixes both problems for $5 a month, with no engineering.
-- **This design on Free** costs nothing. It has more than 40 times today's write volume in reserve. It stops at the limits above, and the first of them is the observer's own cap.
-- **This design on Paid** reaches none of the limits above, at any network size this project plans for.
+- **The current schema on Free** costs nothing. Its writes cross the Free limit at the agent counts under Growth model, and its observer posts run over the CPU limit today.
+- **The current schema on Paid** costs $5 a month. It stays inside the included writes up to about 5,800 quiet agents or 1,900 fully active ones per observer. An observer cannot report that many. Its observer posts are far inside Paid's CPU limits.
+- **This design on Free** costs the build, and nothing to run. It has more than 40 times today's write volume in reserve. It stops at the limits above, and the first of them is the observer's own cap.
+- **This design on Paid** costs the build and $5 a month. It reaches none of the limits above, at any network size this project plans for.
 
 ## Migration
 
+This design deploys with an app release. Watchtower starts empty: nothing carries over from the tables that `0009` drops. From each client's first post after the deploy:
+
+- First-seen values, Activity stamps and hourly history start again. Activity counts every entry of that post as new.
+- Entries and flags that an observer no longer reports are gone.
+- Every warrant is new, so an enabled `new_warrant` rule reports each one that has no open incident.
+
+Observers and bridge reporters stay registered, and alert rules, incidents and names carry on, because their tables are kept.
+
 ### Rollout
 
-1. Migration `0008` creates `ingest_clients` with its trigger, `dna_reports`, `metric_hours` and `throughput_hours`. It fills them from the current tables and leaves those untouched.
-   - Clients come from `observers`, with `apps` and `blocks`. Bridge clients come from `bridge_services`, with `bridge_backlog` and the reporter's latest `bridge_throughput_ts` hour.
-   - An id in both keeps the observer kind. `last_ts_ms` is the client's latest `ingest_nonces.ts`, or 0.
-   - Reports come from `dnas_seen`, with every section's rows, their stamps and their first-seen values. Each observer's `cap_grants` go into each of its reports.
-   - The migration computes each report's rollup and counts. The current hour is the latest `derived_metrics_ts` hour.
-   - Hourly rows come from `derived_metrics_ts` and `bridge_throughput_ts`, except each series' current hour.
-2. Before the deploy, save the JSON of every `GET /api/*` endpoint for the live DNA, and note D1's hourly rows written.
-3. `make deploy-worker` applies `0008`, then deploys the Worker. The new Worker reads and writes only the new tables.
-4. Deploy the dashboard's Activity changes after the Worker.
-5. Check the first full hour:
+Migration `0009` drops every table of migrations 0001 to 0008 that the design does not keep. In the same step, it creates `ingest_clients` with its trigger, `dna_reports`, `metric_hours` and `throughput_hours`.
+
+`0009` declares its preconditions in `-- precondition:` lines. `make deploy-worker` prints them first. If the operator types `yes` or passes `YES=1`, it applies the migration. Any other answer stops it. The preconditions say:
+
+- Every stored observation is dropped, and the dashboard starts empty. Deploy this with an app release.
+- Between this migration and the Worker deploy, every post fails. Each observer and bridge reporter posts its full latest state again on its next cycle.
+- There is no rollback past this migration: an older Worker fails every post.
+
+Steps:
+
+1. Before the deploy, save the JSON of every `GET /api/*` endpoint for each DNA the observers report, and note D1's hourly rows written.
+2. `make deploy-worker` applies `0009`, then deploys the Worker. The new Worker reads and writes only the new tables.
+3. Deploy the dashboard's Activity changes after the Worker.
+4. Check the first full hour:
    - About 88 rows written per hour with today's fleet, 2,112 a day.
    - Observer posts under 10 ms of CPU at the 99th percentile, in Workers analytics.
-   - The saved responses match, apart from the meaning changes above and time-dependent values.
+   - The saved responses match, apart from the meaning changes above, time-dependent values, and what starts again at the first post.
    - Observers and the bridge get 200.
-6. Migration `0009` drops every table of migrations 0001 to 0007 that is not kept. It ships after at least 24 hours of passing checks, with its own approval, through `make deploy-worker`.
-
-The previous Worker can accept posts between `0008` and the deploy. Those reach only the old tables. The next post carries the full latest state, so only that minute's hourly values are lost. A signed request from that minute, replayed before its client's next post, is accepted once.
 
 ### Rollback
 
-- Before `0009`: `wrangler rollback` restores the previous Worker on the old tables, frozen at the cutover.
-  - Its next posts refresh the latest state.
-  - Hourly points and Activity stamps from the new Worker stay in the new tables, unseen.
-  - A later deploy of the new Worker resumes from the new tables. Changes made in between show up as changes at that moment.
-- After `0009`: restore D1 with Time Travel to a moment before `0009`, then run `wrangler rollback`. Free keeps 7 days of Time Travel. Everything written after that moment is lost.
+There is no rollback past `0009`. An older Worker fails every post and every read of observed data, because its tables are gone. A fault in the new Worker is fixed with a new deploy. `docs/DEPLOY.md` states this rule and the deploy order for `0009`, as it does for `0008`.
 
 ### Compatibility
 
-- Deployed observers and bridge reporters need no change: ingest schema 1, the same headers, the same bodies, the same success response.
-- Refusals keep their status codes. Only the replay text changes.
+- The ingest contract does not change: ingest schema 1, the same headers, the same bodies, the same success response. Observers that post `action_hash_b64` with each grant, and bridge reporters, need no change.
+- Refusals keep their status codes and texts, apart from the replay text. Two refusals are new: an observer post missing a section, and a client kind mismatch.
 - Fields added to payload items are stored without a Worker change.
 - The automation's registration SQL on `observer_secrets` is unaffected.
 
@@ -460,14 +485,8 @@ The previous Worker can accept posts between `0008` and the deploy. Those reach 
    - Option (c): never drop them. A 2 MB row cannot hold that.
    - Recommendation: (a). Until the budget binds, it stores exactly what the current tables store.
    - Settling it: the Report budget section of this spec, and the budget constant in the Worker.
-3. **Stay on Workers Free with this design, or move to Workers Paid**.
-   - Option (a): build this design and stay on Free.
-   - Option (b): move to Paid only, and keep the current schema.
-   - Option (c): both.
-   - Recommendation: (a). It removes today's CPU overrun and the growth in writes and reads, at no running cost. Option (b) stays the fallback.
-   - Settling it: no file. The plan changes in the Cloudflare dashboard.
-4. **The observer's 100 KiB per-DNA cap**.
+3. **The observer's 100 KiB per-DNA cap**.
    - Option (a): leave it. The observer then trims agents past about 160 per DNA.
-   - Option (b): raise it, with a more compact payload, in its own lane, once a DNA nears 120 agents.
+   - Option (b): raise it, with a more compact payload, once a DNA nears 120 agents.
    - Recommendation: (b), as separate work. The CPU limit allows a cap about 2 to 2.5 times today's. Production CPU figures from this design set the exact cap, and the report budget moves with it.
    - Settling it: `MAX_DNA_SNAPSHOT_BYTES` in `crates/core/src/lib.rs`, `MAX_DNA_BYTES` in `worker/src/ingest.ts`, and the Report budget section of this spec.
