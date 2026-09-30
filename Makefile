@@ -73,6 +73,7 @@ test: ## Run Rust + Worker + operator-script tests
 	cd $(ROOT_DIR)worker && pnpm test
 	bash $(SCRIPTS)/wipe-dna.test.sh
 	bash $(SCRIPTS)/migration-preconditions.test.sh
+	bash $(SCRIPTS)/wrangler.test.sh
 
 typecheck: ## Typecheck Worker + dashboard
 	cd $(ROOT_DIR)worker    && pnpm typecheck
