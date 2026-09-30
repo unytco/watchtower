@@ -98,7 +98,14 @@ function dna(collected_at: string, fields: Partial<DnaSnapshot> = {}): DnaSnapsh
       { op_hash_b64: "op-2", receipt_count: 2 },
     ],
     cap_grants: [
-      { app_id: "", cell_b64: "", tag: "grant", function_count: 2, access_type: "Transferable" },
+      {
+        app_id: "",
+        cell_b64: "",
+        action_hash_b64: "grant-1",
+        tag: "grant",
+        function_count: 2,
+        access_type: "Transferable",
+      },
     ],
     derived_metrics: { integration_rate: 0.5, lag_p50_ms: 10, lag_p99_ms: 20, pending_backlog: 0 },
     ...fields,

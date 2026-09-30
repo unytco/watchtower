@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_common.sh
 . "${SCRIPT_DIR}/_common.sh"
+# shellcheck source=_test.sh
+. "${SCRIPT_DIR}/_test.sh"
 
 require_cmd pnpm
 require_cmd jq
@@ -51,17 +53,6 @@ rows_of() {
     jq '.[0].results[0].n'
 }
 
-failures=0
-check() {
-  local what="$1" expected="$2" actual="$3"
-  if [[ "$expected" == "$actual" ]]; then
-    log "ok    ${what}"
-  else
-    err "FAIL  ${what}: expected '${expected}', got '${actual}'"
-    failures=$((failures + 1))
-  fi
-}
-
 run_script() {
   rc=0
   out="$(bash "${SCRIPT_DIR}/wipe-dna.sh" "$@" 2>&1)" || rc=$?
@@ -69,16 +60,6 @@ run_script() {
 
 wipe() {
   run_script --persist-to "$persist" "$@"
-}
-
-says() {
-  [[ "$out" == *"$1"* ]] && echo true || echo false
-}
-
-refused() {
-  local what="$1" message="$2"
-  check "${what}: exits nonzero" 1 "$rc"
-  check "${what}: says '${message}'" true "$(says "$message")"
 }
 
 rejects() {
@@ -185,9 +166,6 @@ shim() {
 counts_of() {
   echo "[{\"results\":[{$(seq -s, -f "\"t%g\":$1" 1 "$n_tables")}],\"success\":true}]"
 }
-logged() {
-  grep -q -- "$1" "$SHIM_LOG" && echo true || echo false
-}
 
 shim "$(counts_of 0)" -- "$DNA_A"
 check "no flag targets remote" "true false remote" "$(logged --remote) $(logged --local) $(says "remote D1" | sed 's/true/remote/')"
@@ -203,17 +181,14 @@ shim "$(counts_of 1)" '[]' 'not json' -- --yes "$DNA_A"
 refused "a failed recount" "recounting failed"
 check "a failed recount: the delete ran" true "$(logged --file)"
 
-make_n() {
-  rc=0
-  out="$(make -s -n -C "$REPO_ROOT" wipe-dna "$@" 2>&1)" || rc=$?
-  out="$(tr -s ' ' <<<"$out" | sed 's/.*wipe-dna\.sh //')"
-}
-make_n DNA=x YES=1 LOCAL=1
-check "make YES=1 LOCAL=1 passes --local --yes" "0 --local --yes \"\$DNA\"" "$rc $out"
-make_n DNA=x YES=0 LOCAL=0
-check "make YES=0 LOCAL=0 targets remote and prompts" "0 \"\$DNA\"" "$rc $out"
-make_n DNA=x LOCAL=true
-check "make LOCAL=true is refused" "2 true" "$rc $(says "LOCAL and YES take 0 or 1")"
+make_n wipe-dna DNA=x YES=1 LOCAL=1
+check "make YES=1 LOCAL=1 passes --local --yes" "0 wipe-dna.sh --local --yes \"\$DNA\"" "$rc $out"
+make_n wipe-dna DNA=x YES=0 LOCAL=0
+check "make YES=0 LOCAL=0 targets remote and prompts" "0 wipe-dna.sh \"\$DNA\"" "$rc $out"
+make_n wipe-dna DNA=x LOCAL=true
+check "make LOCAL=true is refused" "2 true" "$rc $(says "LOCAL takes 0 or 1")"
+make_n wipe-dna DNA=x YES=true
+check "make YES=true is refused" "2 true" "$rc $(says "YES takes 0 or 1")"
 for v in LOCAL YES; do
   rc=0
   out="$(env "${v}=1" make -s -n -C "$REPO_ROOT" wipe-dna DNA=x 2>&1)" || rc=$?
@@ -223,8 +198,4 @@ rc=0
 out="$(DNA=x make -s -n -C "$REPO_ROOT" wipe-dna 2>&1)" || rc=$?
 check "make with DNA only in the environment is refused" "2 true" "$rc $(says "DNA=<hash>")"
 
-if ((failures)); then
-  err "${failures} check(s) failed."
-  exit 1
-fi
-log "All wipe-dna checks passed."
+finish wipe-dna

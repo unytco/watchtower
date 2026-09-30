@@ -123,13 +123,7 @@ if ((total == 0)); then
 fi
 
 if ! $assume_yes; then
-  answer=""
-  printf "Type the DNA hash or 'yes' to delete these %s rows from %s: " "$total" "$target_desc" >&2
-  read -r answer || true
-  if [[ "$answer" != "yes" && "${answer#u}" != "$dna" ]]; then
-    err "Not confirmed. Nothing deleted. Scripted runs pass --yes (make: YES=1)."
-    exit 1
-  fi
+  ask_yes "Type the DNA hash or 'yes' to delete these ${total} rows from ${target_desc}" "Nothing deleted." "$dna" "u${dna}"
 fi
 
 tmp_dir="$(mktemp -d)"

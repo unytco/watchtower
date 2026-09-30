@@ -290,7 +290,7 @@ routes.get("/diff", async (c) => {
     return diffOne(c, table, since, observerId, dna);
   }
   const tables = [
-    // DNA-scoped (filtered by ?dna= when provided)
+    // DNA-scoped
     "dnas_seen",
     "agents_discovered",
     "warrants",
@@ -299,7 +299,7 @@ routes.get("/diff", async (c) => {
     "scheduled_functions",
     "slice_hashes",
     "chain_summaries",
-    // Node-scoped (no dna_b64 column; count is for the whole observer)
+    // Node-scoped
     "cap_grants",
     "blocks",
     "apps",
@@ -418,8 +418,6 @@ async function countSince(
     sql += ` AND observer_id = ?`;
     binds.push(observerId);
   }
-  // Some tables (cap_grants, blocks, apps) have no dna_b64 column, so we only
-  // apply the DNA filter when the table actually carries one.
   const tablesWithoutDna = new Set(["cap_grants", "blocks", "apps"]);
   if (dna && !tablesWithoutDna.has(table)) {
     sql += ` AND dna_b64 = ?`;

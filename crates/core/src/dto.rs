@@ -224,6 +224,9 @@ pub struct ValidationCoverageRow {
 pub struct CapGrantSummary {
     pub app_id: String,
     pub cell_b64: String,
+    /// The `Create` or `Update` action this summary reports. The Worker keys on it,
+    /// as tags repeat within a cell.
+    pub action_hash_b64: String,
     pub tag: Option<String>,
     pub function_count: u32,
     pub access_type: String,
@@ -287,6 +290,21 @@ mod tests {
             WarrantProofSummary::ChainFork { seq, .. } => assert_eq!(seq, None),
             other => panic!("expected ChainFork, got {other:?}"),
         }
+    }
+
+    /// The Worker rejects a post whose grant lacks `action_hash_b64`.
+    #[test]
+    fn cap_grant_summary_posts_its_hash_as_action_hash_b64() {
+        let json = serde_json::to_value(CapGrantSummary {
+            app_id: String::new(),
+            cell_b64: String::new(),
+            action_hash_b64: "hash".into(),
+            tag: Some("by_progenitor".into()),
+            function_count: 1,
+            access_type: "Unrestricted".into(),
+        })
+        .unwrap();
+        assert_eq!(json["action_hash_b64"], "hash");
     }
 
     /// `Some` serializes transparently — a bare value, not `{"Some":…}` — so the

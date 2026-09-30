@@ -151,14 +151,15 @@ CREATE TABLE IF NOT EXISTS dna_definitions (
 
 CREATE TABLE IF NOT EXISTS cap_grants (
   observer_id           TEXT NOT NULL,
+  action_hash_b64       TEXT NOT NULL,
+  tag                   TEXT,
   app_id                TEXT NOT NULL,
   cell_b64              TEXT NOT NULL,
-  tag                   TEXT,
   function_count        INTEGER NOT NULL,
   access_type           TEXT NOT NULL,
   updated_at            TEXT NOT NULL,
-  PRIMARY KEY (observer_id, app_id, cell_b64, tag)
-);
+  PRIMARY KEY (observer_id, action_hash_b64)
+) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS blocks (
   observer_id           TEXT NOT NULL,
