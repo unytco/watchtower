@@ -165,6 +165,10 @@ for answer in no y YES; do
   check "a pending precondition, answered ${answer}: only installs and lists" "$LISTED_ONLY" "$(calls)"
 done
 
+deploy < <(printf yes)
+refused "a pending precondition, yes without a newline" "Not confirmed"
+check "a pending precondition, yes without a newline: only installs and lists" "$LISTED_ONLY" "$(calls)"
+
 deploy <<<"yes"
 check "a pending precondition, answered yes: exits zero" 0 "$rc"
 check "a pending precondition, answered yes: applies, then deploys" "list apply list deploy" "$(steps)"

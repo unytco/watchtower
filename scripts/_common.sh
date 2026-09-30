@@ -39,7 +39,8 @@ ask_yes() {
   local question="$1" undone="$2" answer="" accepted
   shift 2
   printf '%s: ' "$question" >&2
-  read -r answer || true
+  # read fails on an answer cut off before its newline; that answer is not given.
+  read -r answer || answer=""
   for accepted in yes "$@"; do
     if [[ "$answer" == "$accepted" ]]; then
       return 0
