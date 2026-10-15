@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- upgrade Holochain to 0.7.1: the observer reads 0.7.1 conductors.
 - The Activity tab counts capability grants that share a tag as separate grants.
 - D1 migration `0008_cap_grants_keyed_by_action.sql`. Apply on redeploy, once every observer runs this release: the Worker rejects an older observer's post that reports a capability grant.
 - The Activity tab counts only new or changed rows, apart from DNAs seen.
@@ -28,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Report degraded observer reads as `null` instead of `0` (apply D1 migration 0005 on redeploy).
 - Report degraded CLI count reads (`pending_ops_count` / `integrated_ops_count` / `nonce_duplicate_count`) as `—` (unknown) instead of `0`; CLI-only, so no D1 or dashboard change.
 - pin Rust 1.95.0 (was 1.93.1): `sqlx` 0.9 requires ≥ 1.94, and 1.95 is what holonix `main-0.7` already provides.
-- `ham` moves from revision `4e10636` to `caee6ee` (ham 0.2.0), which treats a lair restart as a lost connection. It stays pinned to an exact revision, so a change to it arrives in a commit that names it.
+- `ham` moves from revision `4e10636` to `fbb4b6e` (ham 0.3.0), which treats a lair restart as a lost connection. It stays pinned to an exact revision, so a change to it arrives in a commit that names it.
 - Clear the Rust 1.95 clippy warnings in the vendored `chain_doc` crate.
 - Clear the remaining Rust 1.95 clippy warnings across the workspace.
 - docs + example config follow the observer's move to the hash-explorer node (`make hash-explorer-watchtower` replaces the always-online target). Deploy mechanics unchanged.

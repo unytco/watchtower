@@ -7,10 +7,6 @@
 //! `validation_status` and the 36-byte hashes is produced by Holochain's code,
 //! not restated by the test — so a read here that disagrees with the conductor
 //! fails instead of silently returning nothing.
-//!
-//! The predecessor to this file fabricated a hand-written 0.6 schema with
-//! `CREATE TABLE`, which is exactly why the 0.7 breakage it was meant to catch
-//! would have gone unnoticed.
 
 use holo_hash::{
     ActionHash, AgentPubKey, AnyLinkableHash, DhtOpHash, DnaHash, EntryHash, ExternalHash,
@@ -22,12 +18,14 @@ use holochain_data::dht::{
 use holochain_data::kind;
 use holochain_data::{DbWrite, HolochainDataConfig, open_db};
 use holochain_integrity_types::prelude::{
-    Action, ActionData, ActionHeader, AgentValidationPkgData, CapAccessType, CloseChainData,
-    CreateData, EntryType, EntryVisibility, OpenChainData, RecordValidity, Signature, SignedHashed,
+    Action, ActionData, ActionHeader, AgentValidationPkgData, CloseChainData, CreateData,
+    EntryType, EntryVisibility, GrantConstraintType, OpenChainData, RecordValidity, Signature,
+    SignedHashed,
 };
 use holochain_zome_types::prelude::{
-    BlockTargetId, BlockTargetReason, CapAccess, ChainIntegrityWarrant, ChainOpType, Entry,
-    GrantedFunctions, IpBlockReason, MigrationTarget, Timestamp, WarrantProof, ZomeCallCapGrant,
+    BlockTargetId, BlockTargetReason, CapGrant, CapSecret, ChainIntegrityWarrant, ChainOpType,
+    Entry, GrantConstraint, GrantedFunctions, IpBlockReason, MigrationTarget, Timestamp,
+    WarrantProof,
 };
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -722,15 +720,35 @@ async fn validation_coverage_returns_the_least_witnessed_ops_first() {
 
 /// `PrivateEntry` keeps the first entry per hash and author, so grants whose
 /// content differs need different `entry_byte`s.
-async fn commit_unrestricted_grant(
+async fn commit_grant(
     db: &DbWrite<kind::Dht>,
     action_byte: u8,
     author: &AgentPubKey,
     entry_byte: u8,
-    tag: &str,
-    functions: GrantedFunctions,
+    grant: CapGrant,
 ) -> ActionHash {
-    let entry_hash = EntryHash::from_raw_36(vec![entry_byte; 36]);
+    let cap_access = i64::from(GrantConstraintType::from(&grant.constraint));
+    let action =
+        commit_grant_index(db, action_byte, author, entry_byte, cap_access, &grant.tag).await;
+    db.insert_private_entry(
+        &grant_entry_hash(entry_byte),
+        author,
+        &Entry::CapGrant(grant),
+    )
+    .await
+    .unwrap();
+    action
+}
+
+/// A grant's `Create` action and its `CapGrant` index row, without its entry.
+async fn commit_grant_index(
+    db: &DbWrite<kind::Dht>,
+    action_byte: u8,
+    author: &AgentPubKey,
+    entry_byte: u8,
+    cap_access: i64,
+    tag: &str,
+) -> ActionHash {
     let action = signed_action(
         action_byte,
         author,
@@ -738,28 +756,24 @@ async fn commit_unrestricted_grant(
         1_000,
         ActionData::Create(CreateData {
             entry_type: EntryType::CapGrant,
-            entry_hash: entry_hash.clone(),
+            entry_hash: grant_entry_hash(entry_byte),
         }),
     );
     db.insert_action(&action, Some(RecordValidity::Accepted))
         .await
         .unwrap();
-    let grant = ZomeCallCapGrant {
-        tag: tag.to_string(),
-        access: CapAccess::Unrestricted,
-        functions,
-    };
-    db.insert_private_entry(&entry_hash, author, &Entry::CapGrant(grant))
+    db.insert_cap_grant(action.as_hash(), cap_access, Some(tag))
         .await
         .unwrap();
-    db.insert_cap_grant(
-        action.as_hash(),
-        i64::from(CapAccessType::Unrestricted),
-        Some(tag),
-    )
-    .await
-    .unwrap();
     action.as_hash().clone()
+}
+
+fn grant_entry_hash(entry_byte: u8) -> EntryHash {
+    EntryHash::from_raw_36(vec![entry_byte; 36])
+}
+
+fn unrestricted_zome_call_grant(tag: &str, functions: GrantedFunctions) -> CapGrant {
+    CapGrant::new_zome_call_grant(tag.to_string(), GrantConstraint::Unrestricted, functions)
 }
 
 #[tokio::test]
@@ -770,13 +784,15 @@ async fn capability_grants_report_access_type_and_function_count() {
     let mut functions = BTreeSet::new();
     functions.insert(("alliance".into(), "recv_remote_signal".into()));
     functions.insert(("alliance".into(), "notary_read".into()));
-    commit_unrestricted_grant(
+    commit_grant(
         &db,
         0x01,
         &agent(0x11),
         0xa1,
-        "notary",
-        GrantedFunctions::Listed(functions.into_iter().collect()),
+        unrestricted_zome_call_grant(
+            "notary",
+            GrantedFunctions::Listed(functions.into_iter().collect()),
+        ),
     )
     .await;
 
@@ -795,22 +811,20 @@ async fn capability_grants_sharing_a_tag_are_listed_by_their_own_action_hash() {
     let db = new_dht_db(tmp.path(), None).await;
     let author = agent(0x11);
 
-    let first = commit_unrestricted_grant(
+    let first = commit_grant(
         &db,
         0x01,
         &author,
         0xa1,
-        "by_progenitor",
-        GrantedFunctions::All,
+        unrestricted_zome_call_grant("by_progenitor", GrantedFunctions::All),
     )
     .await;
-    let second = commit_unrestricted_grant(
+    let second = commit_grant(
         &db,
         0x02,
         &author,
         0xa1,
-        "by_progenitor",
-        GrantedFunctions::All,
+        unrestricted_zome_call_grant("by_progenitor", GrantedFunctions::All),
     )
     .await;
 
@@ -819,6 +833,118 @@ async fn capability_grants_sharing_a_tag_are_listed_by_their_own_action_hash() {
 
     let hashes: Vec<_> = grants.iter().map(|g| g.action_hash.clone()).collect();
     assert_eq!(hashes, vec![first, second]);
+}
+
+#[tokio::test]
+async fn capability_grants_report_secret_constraints_and_direct_signal_grants() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = new_dht_db(tmp.path(), None).await;
+    let author = agent(0x11);
+    let secret = CapSecret::from([0x5e; 64]);
+
+    commit_grant(
+        &db,
+        0x01,
+        &author,
+        0xa1,
+        CapGrant::new_direct_signal_grant(
+            "signals".to_string(),
+            GrantConstraint::Transferable { secret },
+        ),
+    )
+    .await;
+    commit_grant(
+        &db,
+        0x02,
+        &author,
+        0xa2,
+        CapGrant::new_zome_call_grant(
+            "assigned".to_string(),
+            GrantConstraint::Assigned {
+                secret,
+                assignees: [agent(0x22)].into(),
+            },
+            GrantedFunctions::All,
+        ),
+    )
+    .await;
+
+    let read = open_for_read(tmp.path()).await;
+    let grants = extensions::list_capability_grants(&read).await.unwrap();
+
+    let reported: Vec<_> = grants
+        .iter()
+        .map(|g| (g.tag.as_deref(), g.access_type.as_str(), g.function_count))
+        .collect();
+    assert_eq!(
+        reported,
+        vec![
+            (Some("signals"), "Transferable", 0),
+            (Some("assigned"), "Assigned", 0),
+        ]
+    );
+}
+
+/// A grant entry in the 0.7.0 shape, which 0.7.1 cannot decode.
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "entry_type", content = "entry")]
+enum LegacyEntry {
+    CapGrant {
+        tag: String,
+        access: GrantConstraint,
+        functions: GrantedFunctions,
+    },
+}
+
+#[tokio::test]
+async fn capability_grants_that_read_only_partly_are_still_listed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = new_dht_db(tmp.path(), None).await;
+    let author = agent(0x11);
+
+    let unknown_cap_access = 3;
+    commit_grant_index(&db, 0x01, &author, 0xa1, unknown_cap_access, "future").await;
+    let one_function = [("alliance".into(), "recv_remote_signal".into())].into();
+    db.insert_private_entry(
+        &grant_entry_hash(0xa1),
+        &author,
+        &Entry::CapGrant(unrestricted_zome_call_grant(
+            "future",
+            GrantedFunctions::Listed(one_function),
+        )),
+    )
+    .await
+    .unwrap();
+
+    let unrestricted = i64::from(GrantConstraintType::Unrestricted);
+    commit_grant_index(&db, 0x02, &author, 0xa2, unrestricted, "legacy").await;
+    let legacy = LegacyEntry::CapGrant {
+        tag: "legacy".to_string(),
+        access: GrantConstraint::Unrestricted,
+        functions: GrantedFunctions::All,
+    };
+    sqlx::query("INSERT INTO PrivateEntry (hash, author, blob) VALUES (?, ?, ?)")
+        .bind(grant_entry_hash(0xa2).get_raw_36())
+        .bind(author.get_raw_36())
+        .bind(holochain_serialized_bytes::encode(&legacy).unwrap())
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+    let read = open_for_read(tmp.path()).await;
+    let grants = extensions::list_capability_grants(&read).await.unwrap();
+
+    let reported: Vec<_> = grants
+        .iter()
+        .map(|g| (g.tag.as_deref(), g.access_type.as_str(), g.function_count))
+        .collect();
+    assert_eq!(
+        reported,
+        vec![
+            (Some("future"), "Unknown", 1),
+            (Some("legacy"), "Unrestricted", 0),
+        ]
+    );
 }
 
 // ---------------------------------------------------------------------------

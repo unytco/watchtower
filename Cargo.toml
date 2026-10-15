@@ -37,22 +37,22 @@ humantime = "2"
 rmpv = "1"
 
 # Holochain deps (bumped together when holochain releases)
-holochain_client = { version = "0.9.0", default-features = false }
-holochain_conductor_api = "0.7.0"
-holochain_types = "0.7.0"
-holochain_zome_types = "0.7.0"
-holochain_integrity_types = "0.7.0"
+holochain_client = { version = "=0.9.1", default-features = false }
+holochain_conductor_api = "0.7.1"
+holochain_types = "0.7.1"
+holochain_zome_types = "0.7.1"
+holochain_integrity_types = "0.7.1"
 holochain_serialized_bytes = "0.0.57"
-holo_hash = { version = "0.7.0", features = ["kitsune2"] }
-kitsune2_api = "0.5.0"
-kitsune2_core = "0.5.0"
-kitsune2_dht = "0.5.0"
+holo_hash = { version = "0.7.1", features = ["kitsune2"] }
+kitsune2_api = "0.5.1"
+kitsune2_core = "0.5.1"
+kitsune2_dht = "0.5.1"
 
 # The conductor's own storage layer. `hc_store` reads production conductor
 # databases, so the schema, the `dht-<dna>.db` file naming and the SQLCipher
 # key derivation must all come from the same crate the conductor writes with —
 # a hand-maintained copy of any of the three breaks silently on a schema bump.
-holochain_data = { version = "0.7.0", features = ["encryption"] }
+holochain_data = { version = "0.7.1", features = ["encryption"] }
 sqlx = { version = "0.9.0", default-features = false, features = [
     "runtime-tokio",
     "sqlite",
@@ -70,7 +70,7 @@ unyt_watchtower_hc_store = { path = "crates/hc_store" }
 unyt_watchtower_collector = { path = "crates/collector" }
 
 # Shared Holochain client helpers (ham = Holochain AppWebsocket/Admin helpers).
-ham = { git = "https://github.com/unytco/ham.git", rev = "caee6eeed9a0e2a96e163dd21db57869426decca" }
+ham = { git = "https://github.com/unytco/ham.git", rev = "fbb4b6eb8a79a507e9453b709ed00f15c5618fb4" }
 
 [profile.release]
 lto = "thin"

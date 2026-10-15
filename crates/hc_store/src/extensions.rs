@@ -8,7 +8,7 @@ use crate::retrieve::HolochainDb;
 use crate::{HcOpsError, HcOpsResult};
 use holochain_data::models::dht::{CapGrantRow, ChainLockRow as DbChainLockRow};
 use holochain_integrity_types::prelude::{
-    ActionType, CapAccessType, GrantedFunctions, RecordValidity,
+    ActionType, Capability, GrantConstraintType, GrantedFunctions, RecordValidity, ZomeCallGrant,
 };
 use holochain_zome_types::prelude::{ActionHash, AgentPubKey, Entry};
 use sqlx::{AssertSqlSafe, Row};
@@ -351,16 +351,25 @@ pub async fn list_capability_grants(dht: &HolochainDb) -> HcOpsResult<Vec<CapGra
         .collect())
 }
 
-/// The stable names the Tier-1 DTO and the dashboard use for a grant's access
-/// type. An unrecognised discriminant reads as `Unknown` rather than failing
-/// the whole snapshot.
+/// The stable names the Tier-1 DTO and D1 carry for a grant's access type. An
+/// unrecognised discriminant reads as `Unknown` rather than failing the whole
+/// snapshot.
 fn access_type_label(cap_access: i64) -> String {
-    match CapAccessType::try_from(cap_access) {
-        Ok(CapAccessType::Unrestricted) => "Unrestricted",
-        Ok(CapAccessType::Transferable) => "Transferable",
-        Ok(CapAccessType::Assigned) => "Assigned",
-        Err(v) => {
-            tracing::warn!(cap_access = v, "unknown cap access discriminant");
+    // `GrantConstraintType` has no `TryFrom<i64>`; a variant missing here reads
+    // as `Unknown`.
+    let stored = [
+        GrantConstraintType::Unrestricted,
+        GrantConstraintType::Transferable,
+        GrantConstraintType::Assigned,
+    ]
+    .into_iter()
+    .find(|t| i64::from(*t) == cap_access);
+    match stored {
+        Some(GrantConstraintType::Unrestricted) => "Unrestricted",
+        Some(GrantConstraintType::Transferable) => "Transferable",
+        Some(GrantConstraintType::Assigned) => "Assigned",
+        None => {
+            tracing::warn!(cap_access, "unknown cap access discriminant");
             "Unknown"
         }
     }
@@ -376,15 +385,17 @@ fn count_grant_functions(blob: Option<&[u8]>) -> i64 {
         return 0;
     };
     match holochain_serialized_bytes::decode::<_, Entry>(blob) {
-        // `All` grants every function, so there is no list to size; it is
-        // reported as 0 alongside its `access_type`, which is what says
-        // "unrestricted in scope".
-        Ok(Entry::CapGrant(grant)) => match grant.functions {
-            GrantedFunctions::All => 0,
-            GrantedFunctions::Listed(fns) => fns.len() as i64,
+        Ok(Entry::CapGrant(grant)) => match grant.capability {
+            Capability::ZomeCall(ZomeCallGrant {
+                functions: GrantedFunctions::Listed(fns),
+            }) => fns.len() as i64,
+            // `All` and a direct-signal grant have no function list to size.
+            Capability::ZomeCall(ZomeCallGrant {
+                functions: GrantedFunctions::All,
+            })
+            | Capability::DirectSignal => 0,
         },
         Ok(other) => {
-            // The entry-hash join matched something that is not a cap grant.
             tracing::warn!(
                 entry = ?std::mem::discriminant(&other),
                 "cap grant action's private entry is not a CapGrant"
