@@ -4366,7 +4366,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "unyt_watchtower_chain_doc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -4379,7 +4379,7 @@ dependencies = [
 
 [[package]]
 name = "unyt_watchtower_cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -4402,7 +4402,7 @@ dependencies = [
 
 [[package]]
 name = "unyt_watchtower_collector"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -4426,7 +4426,7 @@ dependencies = [
 
 [[package]]
 name = "unyt_watchtower_core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "chrono",
@@ -4441,7 +4441,7 @@ dependencies = [
 
 [[package]]
 name = "unyt_watchtower_hc_store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -4473,7 +4473,7 @@ dependencies = [
 
 [[package]]
 name = "unyt_watchtower_observer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
