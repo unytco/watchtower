@@ -2,11 +2,12 @@
 //!
 //! [`real_schema`](../real_schema.rs) proves the queries against a database
 //! built with `holochain_data`'s writer API. This goes one step further and
-//! points them at data roots a running conductor produced, cross-checking every
-//! count against `holochain_data`'s own queries over the same file. It is the
-//! gate for a Holochain version bump: a hand-mapped query layer is never
-//! checked against a live database by the compiler, so a schema change lands as
-//! zero rows rather than an error.
+//! points them at data roots a running conductor produced, cross-checking the op
+//! counts, each author's chain and the capability grants against
+//! `holochain_data`'s own queries over the same file; every other read must
+//! succeed and is printed. It is the gate for a Holochain version bump: a
+//! hand-mapped query layer is never checked against a live database by the
+//! compiler, so a schema change lands as zero rows rather than an error.
 //!
 //! Ignored by default — it needs conductor data on disk. To run it:
 //!
@@ -26,8 +27,10 @@
 //! none is configured. Against a production node, use that node's lair
 //! passphrase instead.
 
+use holo_hash::{ActionHash, AgentPubKey};
 use holochain_data::kind;
 use holochain_data::{DatabaseIdentifier, HolochainDataConfig, open_db};
+use holochain_integrity_types::prelude::GrantConstraintType;
 use std::sync::Arc;
 use unyt_watchtower_hc_store::{extensions, retrieve};
 
@@ -156,6 +159,42 @@ async fn reads_agree_with_holochain_data_on_real_databases() {
                 }
             }
 
+            // Every author, not only those with integrated actions:
+            // `list_capability_grants` lists a grant before its op integrates.
+            let authors: Vec<Vec<u8>> = sqlx::query_scalar("SELECT DISTINCT author FROM Action")
+                .fetch_all(hd.pool())
+                .await
+                .unwrap();
+            let mut hd_grants = Vec::new();
+            for author in authors.into_iter().map(AgentPubKey::from_raw_36) {
+                for constraint in [
+                    GrantConstraintType::Unrestricted,
+                    GrantConstraintType::Transferable,
+                    GrantConstraintType::Assigned,
+                ] {
+                    for row in hd_read
+                        .get_cap_grants_by_access(author.clone(), i64::from(constraint))
+                        .await
+                        .unwrap()
+                    {
+                        hd_grants.push((
+                            ActionHash::from_raw_36(row.action_hash),
+                            format!("{constraint:?}"),
+                        ));
+                    }
+                }
+            }
+            hd_grants.sort();
+            let ours_grants: Vec<_> = grants
+                .iter()
+                .map(|g| (g.action_hash.clone(), g.access_type.clone()))
+                .collect();
+            assert_eq!(
+                ours_grants, hd_grants,
+                "{}: capability grants or their access types disagree with holochain_data",
+                dna
+            );
+
             total_actions += counts.iter().map(|(_, c)| c).sum::<i64>();
             checked += 1;
 
@@ -185,6 +224,12 @@ async fn reads_agree_with_holochain_data_on_real_databases() {
                 println!(
                     "    migration author={} closed={} opened={}",
                     m.author, m.chain_closed, m.opening_summary_present
+                );
+            }
+            for g in &grants {
+                println!(
+                    "    grant tag={:?} access_type={} function_count={}",
+                    g.tag, g.access_type, g.function_count
                 );
             }
 
