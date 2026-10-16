@@ -27,7 +27,7 @@
 //! none is configured. Against a production node, use that node's lair
 //! passphrase instead.
 
-use holo_hash::ActionHash;
+use holo_hash::{ActionHash, AgentPubKey};
 use holochain_data::kind;
 use holochain_data::{DatabaseIdentifier, HolochainDataConfig, open_db};
 use holochain_integrity_types::prelude::GrantConstraintType;
@@ -159,8 +159,14 @@ async fn reads_agree_with_holochain_data_on_real_databases() {
                 }
             }
 
+            // Every author, not only those with integrated actions:
+            // `list_capability_grants` lists a grant before its op integrates.
+            let authors: Vec<Vec<u8>> = sqlx::query_scalar("SELECT DISTINCT author FROM Action")
+                .fetch_all(hd.pool())
+                .await
+                .unwrap();
             let mut hd_grants = Vec::new();
-            for (author, _) in &counts {
+            for author in authors.into_iter().map(AgentPubKey::from_raw_36) {
                 for constraint in [
                     GrantConstraintType::Unrestricted,
                     GrantConstraintType::Transferable,
